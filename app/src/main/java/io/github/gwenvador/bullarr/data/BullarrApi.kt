@@ -53,6 +53,36 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String) {
         execute("DELETE", path, emptyMap(), body) as? JSONObject
             ?: throw ApiException("DELETE $path : réponse inattendue (un objet JSON était attendu).")
 
+    /** Image binaire (page du lecteur). Une réponse JSON d'erreur devient une ApiException lisible. */
+    suspend fun getBytes(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val url = baseUrl.newBuilder().addPathSegments(path.trimStart('/')).build()
+        val builder = Request.Builder().url(url).header("Accept", "image/*")
+        if (apiKey.isNotBlank()) builder.header("X-Api-Key", apiKey.trim())
+        val label = "GET /${path.trimStart('/')}"
+        val response = try {
+            client.newCall(builder.build()).execute()
+        } catch (e: IOException) {
+            throw ApiException(networkMessage(e, url))
+        }
+        response.use { resp ->
+            val type = resp.header("Content-Type").orEmpty()
+            if (resp.isSuccessful && type.startsWith("image/")) {
+                return@withContext try { resp.body?.bytes() ?: ByteArray(0) } catch (e: IOException) {
+                    throw ApiException("$label : téléchargement interrompu (${e.message ?: e.javaClass.simpleName}).")
+                }
+            }
+            val text = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+            val detail = runCatching { extractError(JSONObject(text)) }.getOrNull()
+                ?: if (resp.isSuccessful) "réponse inattendue (type $type au lieu d'une image)" else "erreur HTTP ${resp.code}"
+            val hint = when (resp.code) {
+                401 -> "\nVérifiez la clé API (Configuration → Connexion)."
+                in 500..599 -> "\nErreur interne de Bullarr (HTTP ${resp.code})."
+                else -> ""
+            }
+            throw ApiException("$label : $detail$hint", resp.code)
+        }
+    }
+
     private suspend fun execute(method: String, path: String, query: Map<String, String>, body: JSONObject?): Any =
         withContext(Dispatchers.IO) {
             val url = baseUrl.newBuilder().apply {

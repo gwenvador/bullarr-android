@@ -34,6 +34,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val search = SearchState(viewModelScope) { api }
 
+    /** Tome ouvert dans le lecteur plein écran, par-dessus toute l'app. */
+    var reading by mutableStateOf<ReaderTarget?>(null)
+
     // Navigation : les 5 rubriques de la barre latérale web, chacune avec ses sous-onglets.
     var section by mutableStateOf(Section.Library)
     val subTab = androidx.compose.runtime.mutableStateMapOf<Section, Int>()

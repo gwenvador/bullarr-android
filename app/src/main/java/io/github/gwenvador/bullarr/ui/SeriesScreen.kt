@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -70,6 +71,17 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             error?.let { item { ErrorCard(it, Modifier.padding(16.dp), onRetry = { attempt++ }) } }
             item { Header(vm, summary, d) }
+            // One-shot : un seul album, lisible directement sous la couverture.
+            val oneshot = d?.takeIf { it.isOneshot }?.volumes?.firstOrNull { it.owned }
+            if (d != null && oneshot != null) item {
+                androidx.compose.material3.Button(
+                    onClick = { vm.reading = ReaderTarget(oneshot.id, d.title) },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                ) {
+                    Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
+                    Text("Lire")
+                }
+            }
             if (d != null) item {
                 OutlinedButton(
                     onClick = { onSearch(SearchContext(seriesId = d.id, seriesTitle = d.title, volumeId = null, volumeLabel = null, volumeNumber = null)) },
@@ -97,7 +109,10 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     )
                 }
                 items(d.volumes, key = { it.id }) { v ->
-                    VolumeItem(v, vm.coverUrl(v.coverPath), onOpen = { shown = v }) {
+                    VolumeItem(
+                        v, vm.coverUrl(v.coverPath), onOpen = { shown = v },
+                        onRead = if (v.owned) ({ vm.reading = ReaderTarget(v.id, "${d.title} · ${v.label}") }) else null,
+                    ) {
                         onSearch(
                             SearchContext(
                                 seriesId = d.id, seriesTitle = d.title, volumeId = v.id, volumeLabel = v.label,
@@ -111,7 +126,10 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         }
     }
     shown?.let { v ->
-        VolumeSheet(vm, v, onDismiss = { shown = null }, onSearch = {
+        VolumeSheet(vm, v, onDismiss = { shown = null }, onRead = {
+            shown = null
+            vm.reading = ReaderTarget(v.id, "${detail?.title ?: summary.title} · ${v.label}")
+        }, onSearch = {
             shown = null
             detail?.let { d ->
                 onSearch(SearchContext(d.id, d.title, v.id, v.label, v.number, v.isIntegral, v.isHs, v.isEpisode))
@@ -153,7 +171,7 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
 }
 
 @Composable
-private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onSearch: () -> Unit) {
+private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onRead: (() -> Unit)?, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Cover(cover, 44.dp)
@@ -168,6 +186,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onSearc
         Spacer(Modifier.width(8.dp))
         if (v.owned) Tag("Possédé", cs.secondaryContainer, cs.onSecondaryContainer)
         else Tag("Manquant", cs.tertiaryContainer, cs.onTertiaryContainer)
+        if (onRead != null) IconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire ce tome", tint = cs.primary) }
         IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = "Chercher ce tome") }
     }
 }
@@ -175,7 +194,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onSearc
 /** Fiche d'un tome : couverture, résumé et métadonnées ComicInfo, fichier ; la recherche est un bouton à part. */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, onDismiss: () -> Unit, onSearch: () -> Unit) {
+private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, onDismiss: () -> Unit, onRead: () -> Unit, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val ci = v.comicInfo
@@ -221,7 +240,11 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, onDismiss: () -> Unit, o
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    androidx.compose.material3.Button(onClick = onSearch) {
+                    if (v.owned) androidx.compose.material3.Button(onClick = onRead) {
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
+                        Text("Lire")
+                    }
+                    OutlinedButton(onClick = onSearch) {
                         Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
                         Text(if (v.owned) "Chercher (remplacer)" else "Chercher ce tome")
                     }

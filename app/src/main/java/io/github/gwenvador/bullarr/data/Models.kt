@@ -222,6 +222,7 @@ data class SeriesDetail(
     val totalKnown: Int?,
     val monitored: Boolean,
     val completeReason: String?,
+    val isOneshot: Boolean,
     val volumes: List<VolumeRow>,
 )
 
@@ -277,6 +278,7 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
         totalKnown = bd.int("total_volumes"),
         monitored = o.bool("monitored") == true,
         completeReason = o.str("bedetheque_complete_reason"),
+        isOneshot = o.bool("is_oneshot") == true,
         volumes = volumes,
     )
 }

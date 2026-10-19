@@ -45,6 +45,7 @@ import io.github.gwenvador.bullarr.ui.LibraryScreen
 import io.github.gwenvador.bullarr.ui.LoginScreen
 import io.github.gwenvador.bullarr.ui.MonitorScreen
 import io.github.gwenvador.bullarr.ui.NewsScreen
+import io.github.gwenvador.bullarr.ui.ReaderScreen
 import io.github.gwenvador.bullarr.ui.SearchScreen
 import io.github.gwenvador.bullarr.ui.Section
 import io.github.gwenvador.bullarr.ui.SeriesScreen
@@ -74,69 +75,73 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
     BackHandler(enabled = vm.openSeries != null) { vm.openSeries = null }
     BackHandler(enabled = vm.openSeries == null && vm.section != Section.Library) { vm.section = Section.Library }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = {
-            NavigationBar {
-                Section.entries.forEach { s ->
-                    NavigationBarItem(
-                        selected = vm.section == s,
-                        onClick = { vm.openSeries = null; vm.section = s },
-                        icon = { Icon(s.icon, contentDescription = null) },
-                        label = { Text(s.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp) },
-                    )
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                NavigationBar {
+                    Section.entries.forEach { s ->
+                        NavigationBarItem(
+                            selected = vm.section == s,
+                            onClick = { vm.openSeries = null; vm.section = s },
+                            icon = { Icon(s.icon, contentDescription = null) },
+                            label = { Text(s.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp) },
+                        )
+                    }
                 }
-            }
-        },
-    ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad)) {
-            val series = vm.openSeries
-            if (series != null) {
-                SeriesScreen(vm, series, onBack = { vm.openSeries = null }, onSearch = { ctx ->
-                    vm.search.prefill(ctx)
-                    vm.goToSearch()
-                })
-            } else {
-                val section = vm.section
-                Column(Modifier.fillMaxSize()) {
-                    val sub = vm.subTab[section] ?: 0
-                    if (section.subs.isNotEmpty()) {
-                        PrimaryScrollableTabRow(selectedTabIndex = sub, edgePadding = 8.dp) {
-                            section.subs.forEachIndexed { i, label ->
-                                Tab(selected = sub == i, onClick = { vm.subTab[section] = i }, text = { Text(label, maxLines = 1) })
+            },
+        ) { pad ->
+            Box(Modifier.fillMaxSize().padding(pad)) {
+                val series = vm.openSeries
+                if (series != null) {
+                    SeriesScreen(vm, series, onBack = { vm.openSeries = null }, onSearch = { ctx ->
+                        vm.search.prefill(ctx)
+                        vm.goToSearch()
+                    })
+                } else {
+                    val section = vm.section
+                    Column(Modifier.fillMaxSize()) {
+                        val sub = vm.subTab[section] ?: 0
+                        if (section.subs.isNotEmpty()) {
+                            PrimaryScrollableTabRow(selectedTabIndex = sub, edgePadding = 8.dp) {
+                                section.subs.forEachIndexed { i, label ->
+                                    Tab(selected = sub == i, onClick = { vm.subTab[section] = i }, text = { Text(label, maxLines = 1) })
+                                }
                             }
                         }
-                    }
-                    Box(Modifier.fillMaxSize()) {
-                        when (section) {
-                            Section.Library -> LibraryScreen(vm) { vm.openSeries = it }
-                            Section.Search -> SearchScreen(vm)
-                            Section.Tracking -> when (sub) {
-                                0 -> ActivityScreen(vm, snackbar)
-                                1 -> ImportScreen(vm)
-                                2 -> NewsScreen(vm, openSeries)
-                                else -> HistoryScreen(vm, openSeries)
-                            }
-                            Section.Actions -> when (sub) {
-                                0 -> EnrichScreen(vm, snackbar, openSeries)
-                                1 -> MonitorScreen(vm, snackbar, openSeries)
-                                else -> VerificationScreen(vm, snackbar, openSeries)
-                            }
-                            Section.Config -> when (sub) {
-                                0 -> LoginScreen(vm, firstRun = false, onSaved = {})
-                                1 -> ConfigScreen(vm, snackbar, INDEXERS)
-                                2 -> ConfigScreen(vm, snackbar, CLIENTS)
-                                3 -> ConfigScreen(vm, snackbar, NOTIFICATIONS)
-                                4 -> ConfigScreen(vm, snackbar, IMPORTS)
-                                5 -> ConfigScreen(vm, snackbar, SEARCH)
-                                6 -> ConfigScreen(vm, snackbar, MONITOR)
-                                else -> WebSettingsScreen(vm)
+                        Box(Modifier.fillMaxSize()) {
+                            when (section) {
+                                Section.Library -> LibraryScreen(vm) { vm.openSeries = it }
+                                Section.Search -> SearchScreen(vm)
+                                Section.Tracking -> when (sub) {
+                                    0 -> ActivityScreen(vm, snackbar)
+                                    1 -> ImportScreen(vm)
+                                    2 -> NewsScreen(vm, openSeries)
+                                    else -> HistoryScreen(vm, openSeries)
+                                }
+                                Section.Actions -> when (sub) {
+                                    0 -> EnrichScreen(vm, snackbar, openSeries)
+                                    1 -> MonitorScreen(vm, snackbar, openSeries)
+                                    else -> VerificationScreen(vm, snackbar, openSeries)
+                                }
+                                Section.Config -> when (sub) {
+                                    0 -> LoginScreen(vm, firstRun = false, onSaved = {})
+                                    1 -> ConfigScreen(vm, snackbar, INDEXERS)
+                                    2 -> ConfigScreen(vm, snackbar, CLIENTS)
+                                    3 -> ConfigScreen(vm, snackbar, NOTIFICATIONS)
+                                    4 -> ConfigScreen(vm, snackbar, IMPORTS)
+                                    5 -> ConfigScreen(vm, snackbar, SEARCH)
+                                    6 -> ConfigScreen(vm, snackbar, MONITOR)
+                                    else -> WebSettingsScreen(vm)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        DownloadDialogs(vm.downloads)
+        // Lecteur : plein écran par-dessus l'app, qui garde son état dessous.
+        vm.reading?.let { target -> ReaderScreen(vm, target, onClose = { vm.reading = null }) }
     }
-    DownloadDialogs(vm.downloads)
 }
