@@ -172,9 +172,9 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
     LaunchedEffect(bars, barsTick) { if (bars) { delay(3500); bars = false } }
     // Mémorise la page ; un album fini repart du début.
     LaunchedEffect(current) { progress.save(meta.volumeId, current, total) }
-    // Précharge les 2 pages suivantes (et la précédente pour revenir en arrière).
+    // Précharge d'abord la page courante, puis les 2 suivantes (et la précédente pour revenir).
     LaunchedEffect(current) {
-        for (i in listOf(current + 1, current + 2, current - 1)) {
+        for (i in listOf(current, current + 1, current + 2, current - 1)) {
             if (i in 0 until total) launch { runCatching { PageCache.get(api, meta.volumeId, i + 1) } }
         }
     }
@@ -196,7 +196,8 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
             }
         },
     ) {
-        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, key = { it }) { index ->
+        // Les 2 pages suivantes sont déjà composées : le glissement n'attend rien.
+        HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, beyondViewportPageCount = 2, key = { it }) { index ->
             PageView(api, meta.volumeId, index + 1, isCurrent = index == pager.currentPage, fitWidth = fitWidth) { zoomed = it }
         }
 

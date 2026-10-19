@@ -17,7 +17,8 @@ import kotlinx.coroutines.sync.withPermit
  */
 object PageCache {
     private val cache = object : LruCache<String, Bitmap>(
-        minOf(Runtime.getRuntime().maxMemory() / 5, 120L * 1024 * 1024).toInt(),
+        // Les bitmaps matériels vivent côté GPU, hors du tas Java : on peut en garder davantage.
+        160 * 1024 * 1024,
     ) {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
@@ -55,7 +56,13 @@ object PageCache {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1
         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_SIDE) sample *= 2
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        // Décodé ET envoyé au GPU ici, hors du fil principal : afficher la page ne coûte plus rien.
+        val hardware = runCatching {
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
+                inSampleSize = sample; inPreferredConfig = Bitmap.Config.HARDWARE
+            })
+        }.getOrNull()
+        return hardware ?: BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
             ?: throw ApiException("Page $page : l'image reçue est illisible (${bytes.size} octets).")
     }
 
