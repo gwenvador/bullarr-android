@@ -23,6 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.FitScreen
+import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -81,6 +85,10 @@ private val Context.activity: Activity?
 /** Dernière page lue par tome (index 0-based). Absent = jamais lu, ou album fini : on repart du début. */
 private class Progress(context: Context) {
     private val prefs = context.getSharedPreferences("reader", Context.MODE_PRIVATE)
+    /** Réglage global : la page prend la largeur de l'écran (défilement vertical) au lieu de tenir entière. */
+    var fitWidth: Boolean
+        get() = prefs.getBoolean("fit_width", false)
+        set(value) = prefs.edit().putBoolean("fit_width", value).apply()
     fun get(volumeId: Int): Int? = prefs.getInt("page_$volumeId", -1).takeIf { it >= 0 }
     fun save(volumeId: Int, page: Int, pageCount: Int) {
         prefs.edit().apply { if (page >= pageCount - 1) remove("page_$volumeId") else putInt("page_$volumeId", page) }.apply()
@@ -157,6 +165,7 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
     var barsTick by remember { mutableIntStateOf(0) }
     var zoomed by remember { mutableStateOf(false) }
     var sliderPos by remember { mutableStateOf<Float?>(null) }
+    var fitWidth by remember { mutableStateOf(progress.fitWidth) }
     val current = pager.currentPage
 
     // Barres masquées après quelques secondes.
@@ -188,7 +197,7 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
         },
     ) {
         HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, key = { it }) { index ->
-            PageView(api, meta.volumeId, index + 1, isCurrent = index == pager.currentPage) { zoomed = it }
+            PageView(api, meta.volumeId, index + 1, isCurrent = index == pager.currentPage, fitWidth = fitWidth) { zoomed = it }
         }
 
         AnimatedVisibility(bars, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
@@ -201,6 +210,14 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
                     Text(meta.seriesTitle ?: meta.title ?: "", color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val sub = listOfNotNull(meta.label, meta.title?.takeIf { it != meta.seriesTitle }).joinToString(" · ")
                     if (sub.isNotEmpty()) Text(sub, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                // Page entière ↔ pleine largeur (on fait défiler la page vers le bas).
+                TextButton(onClick = { fitWidth = !fitWidth; progress.fitWidth = fitWidth; barsTick++ }) {
+                    Icon(
+                        if (fitWidth) Icons.Outlined.FitScreen else Icons.Outlined.SwapVert,
+                        contentDescription = null, tint = Color.White, modifier = Modifier.padding(end = 6.dp),
+                    )
+                    Text(if (fitWidth) "Page entière" else "Pleine largeur", color = Color.White)
                 }
             }
         }
@@ -235,7 +252,7 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
 
 /** Une page : chargement, erreur lisible avec réessai, zoom par pincement (jusqu'à ×5) puis déplacement. */
 @Composable
-private fun PageView(api: BullarrApi, volumeId: Int, page: Int, isCurrent: Boolean, onZoom: (Boolean) -> Unit) {
+private fun PageView(api: BullarrApi, volumeId: Int, page: Int, isCurrent: Boolean, fitWidth: Boolean, onZoom: (Boolean) -> Unit) {
     var bitmap by remember(volumeId, page) { mutableStateOf(PageCache.cached(volumeId, page)) }
     var error by remember(volumeId, page) { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
@@ -250,7 +267,7 @@ private fun PageView(api: BullarrApi, volumeId: Int, page: Int, isCurrent: Boole
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     // Une page qui n'est plus affichée revient à sa taille.
-    LaunchedEffect(isCurrent) { if (!isCurrent) { scale = 1f; offset = Offset.Zero } }
+    LaunchedEffect(isCurrent, fitWidth) { if (!isCurrent || fitWidth) { scale = 1f; offset = Offset.Zero } }
     LaunchedEffect(scale, isCurrent) { if (isCurrent) onZoom(scale > 1.01f) }
 
     Box(
@@ -280,6 +297,16 @@ private fun PageView(api: BullarrApi, volumeId: Int, page: Int, isCurrent: Boole
     ) {
         val b = bitmap
         when {
+            b != null && fitWidth -> Box(
+                // Pleine largeur : la page est plus haute que l'écran, on la fait défiler.
+                Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Image(
+                    b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             b != null -> Image(
                 b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
