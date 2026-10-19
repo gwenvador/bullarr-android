@@ -1,0 +1,15 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+build/
+
+# Fichiers locaux
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+
+# APK : publiés dans les releases, pas dans le dépôt
+*.apk
+*.aab
