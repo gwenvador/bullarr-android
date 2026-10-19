@@ -298,14 +298,16 @@ private fun PageView(api: BullarrApi, volumeId: Int, page: Int, isCurrent: Boole
         val b = bitmap
         when {
             b != null && fitWidth -> Box(
-                // Pleine largeur : la page est plus haute que l'écran, on la fait défiler.
-                Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y)
-                    .verticalScroll(rememberScrollState()),
+                // Pleine largeur : centrée si elle est plus basse que l'écran (portrait),
+                // sinon on la fait défiler (paysage).
+                Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
             ) {
-                Image(
-                    b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.FillWidth,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(Modifier.align(Alignment.Center).verticalScroll(rememberScrollState())) {
+                    Image(
+                        b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.FillWidth,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
             b != null -> Image(
                 b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.Fit,
