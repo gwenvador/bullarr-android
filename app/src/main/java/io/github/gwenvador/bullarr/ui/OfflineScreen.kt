@@ -90,6 +90,7 @@ fun OfflineScreen(vm: AppViewModel) {
     }
     val closed = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
     var readTick by remember { mutableStateOf(0) }
+    var groupToDelete by remember { mutableStateOf<OfflineGroup?>(null) }
     var toDelete by remember { mutableStateOf<OfflineStore.Item?>(null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
@@ -158,6 +159,10 @@ fun OfflineScreen(vm: AppViewModel) {
                     listOfNotNull(if (unread > 0) "$unread non lu(s)" else null, "${g.items.size} album(s)", formatBytes(g.items.sumOf { it.sizeBytes })).joinToString(" · "),
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Supprimer tous les albums de la série (avec confirmation).
+                IconButton(onClick = { groupToDelete = g }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Supprimer tous les albums de ${g.title}", modifier = Modifier.size(20.dp))
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -203,6 +208,21 @@ fun OfflineScreen(vm: AppViewModel) {
         }
     }
 
+    groupToDelete?.let { g ->
+        AlertDialog(
+            onDismissRequest = { groupToDelete = null },
+            title = { Text("Supprimer la série ?") },
+            text = {
+                Text("${g.title}\n${g.items.size} album(s) seront supprimés de l'appareil, ${formatBytes(g.items.sumOf { it.sizeBytes }) ?: ""} libérés. Ils restent sur Bullarr.")
+            },
+            confirmButton = {
+                TextButton(onClick = { g.items.forEach { mgr.delete(it.meta.volumeId) }; groupToDelete = null }) {
+                    Text("Supprimer ${g.items.size} album(s)", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { groupToDelete = null }) { Text("Annuler") } },
+        )
+    }
     toDelete?.let { it ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
