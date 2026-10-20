@@ -143,6 +143,6 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
         }
         DownloadDialogs(vm.downloads)
         // Lecteur : plein écran par-dessus l'app, qui garde son état dessous.
-        vm.reading?.let { target -> ReaderScreen(vm, target, onClose = { vm.reading = null }) }
+        vm.reading?.let { target -> ReaderScreen(vm, target, onClose = { vm.reading = null; vm.progressVersion++ }) }
     }
 }

@@ -70,6 +70,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import io.github.gwenvador.bullarr.data.BullarrApi
 import io.github.gwenvador.bullarr.data.OfflineStore
 import io.github.gwenvador.bullarr.data.PageCache
+import io.github.gwenvador.bullarr.data.ReadingProgress
 import io.github.gwenvador.bullarr.data.ReaderMeta
 import io.github.gwenvador.bullarr.data.parseReaderMeta
 import io.github.gwenvador.bullarr.data.readable
@@ -82,19 +83,6 @@ data class ReaderTarget(val volumeId: Int, val title: String)
 
 private val Context.activity: Activity?
     get() = when (this) { is Activity -> this; is ContextWrapper -> baseContext.activity; else -> null }
-
-/** Dernière page lue par tome (index 0-based). Absent = jamais lu, ou album fini : on repart du début. */
-private class Progress(context: Context) {
-    private val prefs = context.getSharedPreferences("reader", Context.MODE_PRIVATE)
-    /** Réglage global : la page prend la largeur de l'écran (défilement vertical) au lieu de tenir entière. */
-    var fitWidth: Boolean
-        get() = prefs.getBoolean("fit_width", false)
-        set(value) = prefs.edit().putBoolean("fit_width", value).apply()
-    fun get(volumeId: Int): Int? = prefs.getInt("page_$volumeId", -1).takeIf { it >= 0 }
-    fun save(volumeId: Int, page: Int, pageCount: Int) {
-        prefs.edit().apply { if (page >= pageCount - 1) remove("page_$volumeId") else putInt("page_$volumeId", page) }.apply()
-    }
-}
 
 @Composable
 fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
@@ -134,7 +122,7 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         val m = meta
         when {
-            m != null -> Reader(api, vm.offline.store, m, Progress(context), onClose)
+            m != null -> Reader(api, vm.offline.store, m, ReadingProgress(context), onClose)
             else -> {
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     if (error == null) CircularProgressIndicator(color = Color.White)
@@ -152,7 +140,7 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
 }
 
 @Composable
-private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, progress: Progress, onClose: () -> Unit) {
+private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, progress: ReadingProgress, onClose: () -> Unit) {
     val total = meta.pageCount
     if (total <= 0) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

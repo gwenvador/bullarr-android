@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.gwenvador.bullarr.data.OfflineStore
+import io.github.gwenvador.bullarr.data.ReadStatus
 import io.github.gwenvador.bullarr.data.formatBytes
 import io.github.gwenvador.bullarr.data.normalize
 import kotlinx.coroutines.Dispatchers
@@ -88,15 +89,15 @@ fun OfflineScreen(vm: AppViewModel) {
         }
     }
     val closed = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
+    var readTick by remember { mutableStateOf(0) }
     var toDelete by remember { mutableStateOf<OfflineStore.Item?>(null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         if (all.isNotEmpty()) item {
-            ClearableField(
+            CompactSearchField(
                 value = query, onValueChange = { query = it },
                 placeholder = "Rechercher dans les albums hors ligne…",
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             )
         }
         if (all.isNotEmpty()) item {
@@ -152,7 +153,11 @@ fun OfflineScreen(vm: AppViewModel) {
                 Icon(if (open) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, contentDescription = if (open) "Replier" else "Déplier")
                 Spacer(Modifier.width(8.dp))
                 Text(g.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text("${g.items.size} · ${formatBytes(g.items.sumOf { it.sizeBytes }) ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val unread = remember(vm.progressVersion, readTick, g.items) { g.items.count { vm.reads.status(it.meta.volumeId) == ReadStatus.Unread } }
+                Text(
+                    listOfNotNull(if (unread > 0) "$unread non lu(s)" else null, "${g.items.size} album(s)", formatBytes(g.items.sumOf { it.sizeBytes })).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
@@ -170,7 +175,22 @@ fun OfflineScreen(vm: AppViewModel) {
                     it.meta.title?.takeIf { t -> t != it.meta.seriesTitle && t != rowTitle }?.let { t ->
                         Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Text("${it.meta.pageCount} pages · ${formatBytes(it.sizeBytes) ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Appui sur l'état : marquer lu / non lu.
+                        val st = remember(vm.progressVersion, readTick) { vm.reads.status(it.meta.volumeId) }
+                        val cs = MaterialTheme.colorScheme
+                        Box(Modifier.clickable {
+                            if (st == ReadStatus.Read) vm.reads.markUnread(it.meta.volumeId) else vm.reads.markRead(it.meta.volumeId)
+                            readTick++
+                        }) {
+                            when (st) {
+                                ReadStatus.Unread -> Tag("Non lu", cs.primaryContainer, cs.onPrimaryContainer)
+                                is ReadStatus.InProgress -> Tag("En cours · p. ${st.page + 1}/${it.meta.pageCount}", cs.tertiaryContainer, cs.onTertiaryContainer)
+                                ReadStatus.Read -> Tag("Lu", cs.surfaceVariant, cs.onSurfaceVariant)
+                            }
+                        }
+                        Text("${it.meta.pageCount} pages · ${formatBytes(it.sizeBytes) ?: ""}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                    }
                 }
                 IconButton(onClick = { vm.reading = ReaderTarget(it.meta.volumeId, title) }) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire", tint = MaterialTheme.colorScheme.primary) }
                 IconButton(onClick = { toDelete = it }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer la copie") }

@@ -160,5 +160,6 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (!firstRun) UpdateCard(vm)
     }
 }

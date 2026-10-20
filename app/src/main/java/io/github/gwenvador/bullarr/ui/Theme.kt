@@ -1,6 +1,9 @@
 package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -211,5 +214,36 @@ fun ClearableField(
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
+    )
+}
+
+/** Champ de recherche compact (40 dp) : loupe, texte, croix pour effacer. Pour les listes denses. */
+@Composable
+fun CompactSearchField(value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.foundation.text.BasicTextField(
+        value = value, onValueChange = onValueChange, singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = cs.onSurface),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(cs.primary),
+        modifier = modifier.fillMaxWidth().height(40.dp),
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxSize().background(cs.surfaceVariant, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1)
+                    inner()
+                }
+                if (value.isNotEmpty()) {
+                    Icon(
+                        Icons.Outlined.Clear, contentDescription = "Effacer", tint = cs.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp).clip(RoundedCornerShape(10.dp)).clickable { onValueChange("") },
+                    )
+                }
+            }
+        },
     )
 }

@@ -34,6 +34,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val search = SearchState(viewModelScope) { api }
 
+    /** Incrémenté à la fermeture du lecteur : les listes relisent l'état de lecture. */
+    var progressVersion by mutableStateOf(0)
+    val reads by lazy { io.github.gwenvador.bullarr.data.ReadingProgress(app) }
+
+    /** Version installée (versionName) et build. */
+    val installedVersion: String = runCatching {
+        val i = app.packageManager.getPackageInfo(app.packageName, 0)
+        "${i.versionName} (build ${i.longVersionCode})"
+    }.getOrDefault("inconnue")
+    private val installedName: String = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "0"
+
+    var update by mutableStateOf<io.github.gwenvador.bullarr.data.UpdateState>(io.github.gwenvador.bullarr.data.UpdateState.Idle); private set
+
+    fun checkUpdate() {
+        update = io.github.gwenvador.bullarr.data.UpdateState.Checking
+        viewModelScope.launch {
+            update = try {
+                val latest = io.github.gwenvador.bullarr.data.UpdateChecker.latest()
+                if (latest != null && io.github.gwenvador.bullarr.data.compareVersions(latest.version, installedName) > 0)
+                    io.github.gwenvador.bullarr.data.UpdateState.Available(latest)
+                else io.github.gwenvador.bullarr.data.UpdateState.UpToDate(latest)
+            } catch (e: Exception) {
+                io.github.gwenvador.bullarr.data.UpdateState.Failed(e.readable())
+            }
+        }
+    }
+
     /** Albums copiés pour la lecture hors ligne. */
     val offline = io.github.gwenvador.bullarr.data.OfflineManager(viewModelScope, { api }, io.github.gwenvador.bullarr.data.OfflineStore(app))
 
