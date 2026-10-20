@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.gwenvador.bullarr.data.OfflineStore
 import io.github.gwenvador.bullarr.data.formatBytes
+import io.github.gwenvador.bullarr.data.normalize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -59,15 +61,33 @@ import java.io.File
 @Composable
 fun OfflineScreen(vm: AppViewModel) {
     val mgr = vm.offline
-    val items = remember(mgr.version, mgr.active.size) { mgr.store.list() }
+    val all = remember(mgr.version, mgr.active.size) { mgr.store.list() }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    // Recherche locale, sans accents : série, titre de l'album, numéro.
+    val terms = normalize(query).split(' ').filter { it.isNotBlank() }
+    val items = remember(all, query) {
+        if (terms.isEmpty()) all else all.filter { it.searchKey().let { k -> terms.all { t -> t in k } } }
+    }
     var toDelete by remember { mutableStateOf<OfflineStore.Item?>(null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        if (all.isNotEmpty()) item {
+            ClearableField(
+                value = query, onValueChange = { query = it },
+                placeholder = "Rechercher dans les albums hors ligne…",
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            )
+        }
         item {
             val total = items.sumOf { it.sizeBytes }
             Text(
-                if (items.isEmpty()) "Aucun album sur l'appareil."
-                else "${items.size} album(s) · ${formatBytes(total) ?: "0 o"} sur l'appareil",
+                when {
+                    all.isEmpty() -> "Aucun album sur l'appareil."
+                    items.isEmpty() -> "Aucun résultat pour « $query »."
+                    terms.isNotEmpty() -> "${items.size} sur ${all.size} album(s) · ${formatBytes(total) ?: "0 o"}"
+                    else -> "${items.size} album(s) · ${formatBytes(total) ?: "0 o"} sur l'appareil"
+                },
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
             )
@@ -115,7 +135,7 @@ fun OfflineScreen(vm: AppViewModel) {
             }
             HorizontalDivider(Modifier.padding(start = 76.dp), color = MaterialTheme.colorScheme.outlineVariant)
         }
-        if (items.isEmpty() && mgr.active.isEmpty()) {
+        if (all.isEmpty() && mgr.active.isEmpty()) {
             item { EmptyState("Rien hors ligne", "Dans la fiche d'un tome, touchez « Télécharger hors ligne » pour le lire sans réseau.") }
         }
     }
@@ -292,3 +312,6 @@ fun SeriesOfflineIcon(vm: AppViewModel, volumes: List<OfflineVolume>) {
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("Annuler") } },
     )
 }
+
+private fun OfflineStore.Item.searchKey(): String =
+    normalize(listOfNotNull(meta.seriesTitle, meta.label, meta.title).joinToString(" "))
