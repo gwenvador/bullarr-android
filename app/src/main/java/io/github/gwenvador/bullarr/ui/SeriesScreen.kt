@@ -83,12 +83,6 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 }
             }
             if (d != null) item {
-                SeriesOfflineBar(
-                    vm, d.volumes.filter { it.owned }.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) },
-                    Modifier.padding(horizontal = 16.dp),
-                )
-            }
-            if (d != null) item {
                 OutlinedButton(
                     onClick = { onSearch(SearchContext(seriesId = d.id, seriesTitle = d.title, volumeId = null, volumeLabel = null, volumeNumber = null)) },
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -157,10 +151,11 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
                 (d?.authors ?: s.author)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 val meta = listOfNotNull(d?.years ?: s.year, d?.genre, d?.publishers).joinToString(" · ")
                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     val cs = MaterialTheme.colorScheme
                     d?.status?.let { Tag(it, cs.secondaryContainer, cs.onSecondaryContainer) }
                     if (d?.monitored == true) Tag("Surveillée", cs.primaryContainer, cs.onPrimaryContainer)
+                    if (d != null) SeriesOfflineIcon(vm, d.volumes.filter { it.owned }.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) })
                 }
             }
         }

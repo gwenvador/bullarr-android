@@ -231,61 +231,64 @@ fun OfflineIcon(vm: AppViewModel, volumeId: Int, title: String) {
 /** Un tome possédé d'une série : identifiant, titre affiché, nombre de pages connu. */
 data class OfflineVolume(val id: Int, val title: String, val pages: Int?)
 
-/** Bandeau de l'en-tête d'une série : tout télécharger, suivre l'avancement, tout supprimer. */
+/**
+ * Icône unique de l'en-tête d'une série, à côté de son statut : télécharger tous les albums,
+ * suivre l'avancement (appui = tout arrêter) ou, une fois tout copié, supprimer les copies.
+ */
 @Composable
-fun SeriesOfflineBar(vm: AppViewModel, volumes: List<OfflineVolume>, modifier: Modifier = Modifier) {
+fun SeriesOfflineIcon(vm: AppViewModel, volumes: List<OfflineVolume>) {
     if (volumes.isEmpty()) return
     val mgr = vm.offline
     val cs = MaterialTheme.colorScheme
     val downloaded = volumes.count { mgr.isDownloaded(it.id) }
-    val running = volumes.count { mgr.active[it.id]?.error == null && mgr.active.containsKey(it.id) }
-    val failed = volumes.count { mgr.active[it.id]?.error != null }
+    val running = volumes.filter { mgr.active[it.id]?.error == null && mgr.active.containsKey(it.id) }
+    val failed = volumes.filter { mgr.active[it.id]?.error != null }
     val todo = volumes.filter { !mgr.isDownloaded(it.id) && !mgr.active.containsKey(it.id) }
-    var confirmAll by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf(false) }
     // Estimation : ~1 Mo par page quand le nombre de pages est connu, 40 pages sinon.
     val estimate = todo.sumOf { (it.pages ?: 40) * 1_000_000L }
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(
+            onClick = {
+                when {
+                    running.isNotEmpty() -> running.forEach { mgr.cancel(it.id) }
+                    failed.isNotEmpty() -> failed.forEach { mgr.start(it.id, it.title) }
+                    else -> confirm = true
+                }
+            },
+            modifier = Modifier.size(32.dp),
+        ) {
             when {
-                running > 0 -> androidx.compose.material3.OutlinedButton(onClick = { volumes.forEach { mgr.cancel(it.id) } }) {
-                    Text("Arrêter les téléchargements ($running)")
+                running.isNotEmpty() -> Box(contentAlignment = Alignment.Center) {
+                    val total = volumes.sumOf { mgr.active[it.id]?.total ?: 0 }.coerceAtLeast(1)
+                    val done = volumes.sumOf { mgr.active[it.id]?.done ?: 0 }
+                    androidx.compose.material3.CircularProgressIndicator(progress = { done.toFloat() / total }, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    Icon(Icons.Outlined.Close, contentDescription = "Arrêter les téléchargements", modifier = Modifier.size(11.dp))
                 }
-                todo.isNotEmpty() -> androidx.compose.material3.Button(onClick = { confirmAll = true }) {
-                    Icon(Icons.Outlined.DownloadForOffline, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                    Text(if (downloaded == 0) "Tout télécharger hors ligne (${todo.size})" else "Télécharger le reste (${todo.size})")
-                }
-                else -> androidx.compose.material3.OutlinedButton(onClick = { confirmDelete = true }) {
-                    Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                    Text("Supprimer les copies hors ligne")
-                }
+                failed.isNotEmpty() -> Icon(Icons.Outlined.Refresh, contentDescription = "Réessayer les téléchargements en erreur", tint = cs.error)
+                todo.isEmpty() -> Icon(Icons.Outlined.OfflinePin, contentDescription = "Tous les albums sont hors ligne — supprimer les copies", tint = cs.primary)
+                else -> Icon(Icons.Outlined.DownloadForOffline, contentDescription = "Télécharger tous les albums hors ligne")
             }
         }
-        val status = listOfNotNull(
-            if (downloaded > 0) "$downloaded/${volumes.size} hors ligne" else null,
-            if (running > 0) "$running en cours" else null,
-            if (failed > 0) "$failed en erreur" else null,
-        ).joinToString(" · ")
-        if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, color = if (failed > 0) cs.error else cs.onSurfaceVariant)
-        if (failed > 0) TextButton(onClick = { volumes.filter { mgr.active[it.id]?.error != null }.forEach { mgr.start(it.id, it.title) } }) { Text("Réessayer ceux en erreur") }
-        if (downloaded > 0 && todo.isNotEmpty() && running == 0) {
-            TextButton(onClick = { confirmDelete = true }) { Text("Supprimer les copies ($downloaded)", color = cs.error) }
+        // Compteur discret : « 3/12 » albums copiés.
+        if (downloaded > 0 || running.isNotEmpty()) {
+            Text("$downloaded/${volumes.size}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
         }
     }
 
-    if (confirmAll) AlertDialog(
-        onDismissRequest = { confirmAll = false },
-        title = { Text("Tout télécharger ?") },
-        text = { Text("${todo.size} album(s), environ ${formatBytes(estimate) ?: ""} (estimation). L'espace libre est vérifié avant chaque album. Les téléchargements continuent tant que l'app est ouverte.") },
-        confirmButton = { TextButton(onClick = { todo.forEach { mgr.start(it.id, it.title) }; confirmAll = false }) { Text("Télécharger") } },
-        dismissButton = { TextButton(onClick = { confirmAll = false }) { Text("Annuler") } },
+    if (confirm && todo.isNotEmpty()) AlertDialog(
+        onDismissRequest = { confirm = false },
+        title = { Text("Tout télécharger hors ligne ?") },
+        text = { Text("${todo.size} album(s), environ ${formatBytes(estimate) ?: ""} (estimation). Les téléchargements continuent tant que l'app est ouverte.") },
+        confirmButton = { TextButton(onClick = { todo.forEach { mgr.start(it.id, it.title) }; confirm = false }) { Text("Télécharger") } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Annuler") } },
     )
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
+    if (confirm && todo.isEmpty()) AlertDialog(
+        onDismissRequest = { confirm = false },
         title = { Text("Supprimer les copies ?") },
         text = { Text("$downloaded album(s) seront supprimés de l'appareil. Ils restent sur Bullarr.") },
-        confirmButton = { TextButton(onClick = { volumes.filter { mgr.isDownloaded(it.id) }.forEach { mgr.delete(it.id) }; confirmDelete = false }) { Text("Supprimer", color = cs.error) } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annuler") } },
+        confirmButton = { TextButton(onClick = { volumes.forEach { mgr.delete(it.id) }; confirm = false }) { Text("Supprimer", color = cs.error) } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Annuler") } },
     )
 }
