@@ -81,7 +81,12 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
                     Text("Lire")
                 }
-                OfflineButton(vm, oneshot.id, d.title, Modifier.padding(horizontal = 16.dp))
+            }
+            if (d != null) item {
+                SeriesOfflineBar(
+                    vm, d.volumes.filter { it.owned }.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) },
+                    Modifier.padding(horizontal = 16.dp),
+                )
             }
             if (d != null) item {
                 OutlinedButton(
@@ -111,7 +116,8 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 }
                 items(d.volumes, key = { it.id }) { v ->
                     VolumeItem(
-                        v, vm.coverUrl(v.coverPath), offline = vm.offline.isDownloaded(v.id), onOpen = { shown = v },
+                        v, vm.coverUrl(v.coverPath), onOpen = { shown = v },
+                        offlineIcon = if (v.owned) ({ OfflineIcon(vm, v.id, "${d.title} · ${v.label}") }) else null,
                         onRead = if (v.owned) ({ vm.reading = ReaderTarget(v.id, "${d.title} · ${v.label}") }) else null,
                     ) {
                         onSearch(
@@ -172,7 +178,7 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
 }
 
 @Composable
-private fun VolumeItem(v: VolumeRow, cover: String?, offline: Boolean, onOpen: () -> Unit, onRead: (() -> Unit)?, onSearch: () -> Unit) {
+private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, offlineIcon: (@Composable () -> Unit)?, onRead: (() -> Unit)?, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Cover(cover, 44.dp)
@@ -185,9 +191,8 @@ private fun VolumeItem(v: VolumeRow, cover: String?, offline: Boolean, onOpen: (
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        if (offline) Tag("Hors ligne", cs.primaryContainer, cs.onPrimaryContainer)
-        else if (v.owned) Tag("Possédé", cs.secondaryContainer, cs.onSecondaryContainer)
-        else Tag("Manquant", cs.tertiaryContainer, cs.onTertiaryContainer)
+        if (!v.owned) Tag("Manquant", cs.tertiaryContainer, cs.onTertiaryContainer)
+        offlineIcon?.invoke()
         if (onRead != null) IconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire ce tome", tint = cs.primary) }
         IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = "Chercher ce tome") }
     }
