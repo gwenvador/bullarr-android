@@ -81,6 +81,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
                     Text("Lire")
                 }
+                OfflineButton(vm, oneshot.id, d.title, Modifier.padding(horizontal = 16.dp))
             }
             if (d != null) item {
                 OutlinedButton(
@@ -110,7 +111,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 }
                 items(d.volumes, key = { it.id }) { v ->
                     VolumeItem(
-                        v, vm.coverUrl(v.coverPath), onOpen = { shown = v },
+                        v, vm.coverUrl(v.coverPath), offline = vm.offline.isDownloaded(v.id), onOpen = { shown = v },
                         onRead = if (v.owned) ({ vm.reading = ReaderTarget(v.id, "${d.title} · ${v.label}") }) else null,
                     ) {
                         onSearch(
@@ -126,7 +127,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         }
     }
     shown?.let { v ->
-        VolumeSheet(vm, v, onDismiss = { shown = null }, onRead = {
+        VolumeSheet(vm, v, detail, summary, onDismiss = { shown = null }, onRead = {
             shown = null
             vm.reading = ReaderTarget(v.id, "${detail?.title ?: summary.title} · ${v.label}")
         }, onSearch = {
@@ -171,7 +172,7 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
 }
 
 @Composable
-private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onRead: (() -> Unit)?, onSearch: () -> Unit) {
+private fun VolumeItem(v: VolumeRow, cover: String?, offline: Boolean, onOpen: () -> Unit, onRead: (() -> Unit)?, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Cover(cover, 44.dp)
@@ -184,7 +185,8 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onRead:
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        if (v.owned) Tag("Possédé", cs.secondaryContainer, cs.onSecondaryContainer)
+        if (offline) Tag("Hors ligne", cs.primaryContainer, cs.onPrimaryContainer)
+        else if (v.owned) Tag("Possédé", cs.secondaryContainer, cs.onSecondaryContainer)
         else Tag("Manquant", cs.tertiaryContainer, cs.onTertiaryContainer)
         if (onRead != null) IconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire ce tome", tint = cs.primary) }
         IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = "Chercher ce tome") }
@@ -194,7 +196,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onRead:
 /** Fiche d'un tome : couverture, résumé et métadonnées ComicInfo, fichier ; la recherche est un bouton à part. */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, onDismiss: () -> Unit, onRead: () -> Unit, onSearch: () -> Unit) {
+private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, summary: SeriesSummary, onDismiss: () -> Unit, onRead: () -> Unit, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val ci = v.comicInfo
@@ -244,6 +246,7 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, onDismiss: () -> Unit, o
                         Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
                         Text("Lire")
                     }
+                    if (v.owned) OfflineButton(vm, v.id, "${detail?.title ?: summary.title} · ${v.label}")
                     OutlinedButton(onClick = onSearch) {
                         Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
                         Text(if (v.owned) "Chercher (remplacer)" else "Chercher ce tome")

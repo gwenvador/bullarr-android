@@ -31,7 +31,7 @@ object PageCache {
 
     fun cached(volumeId: Int, page: Int): Bitmap? = cache.get("$volumeId:$page")
 
-    suspend fun get(api: BullarrApi, volumeId: Int, page: Int): Bitmap {
+    suspend fun get(api: BullarrApi, volumeId: Int, page: Int, offline: OfflineStore? = null): Bitmap {
         val key = "$volumeId:$page"
         cache.get(key)?.let { return it }
         val job = synchronized(inflight) {
@@ -39,7 +39,9 @@ object PageCache {
                 scope.async {
                     try {
                         gate.withPermit {
-                            val bytes = api.getBytes("api/volumes/$volumeId/reader/page/$page")
+                            // Copie hors ligne d'abord : aucun réseau nécessaire.
+                            val local = offline?.pageFile(volumeId, page)?.takeIf { it.length() > 0 }
+                            val bytes = local?.readBytes() ?: api.getBytes("api/volumes/$volumeId/reader/page/$page")
                             decode(bytes, page).also { cache.put(key, it) }
                         }
                     } finally {
@@ -72,9 +74,10 @@ object PageCache {
     }
 }
 
-data class ReaderMeta(val volumeId: Int, val seriesTitle: String?, val label: String?, val title: String?, val pageCount: Int)
+data class ReaderMeta(val volumeId: Int, val seriesTitle: String?, val label: String?, val title: String?, val pageCount: Int, val seriesId: Int? = null)
 
 fun parseReaderMeta(volumeId: Int, o: org.json.JSONObject) = ReaderMeta(
     volumeId, o.str("series_title"), o.str("label"), o.str("title"),
     o.int("page_count") ?: throw ApiException("GET /api/volumes/$volumeId/reader : le nombre de pages est absent de la réponse."),
+    o.int("series_id"),
 )

@@ -76,7 +76,15 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
             modifier = Modifier.fillMaxSize(),
         ) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-                vm.libraryError?.let { item { ErrorCard(it, Modifier.padding(16.dp), onRetry = { vm.loadLibrary(force = true) }) } }
+                vm.libraryError?.let { item {
+                    Column {
+                        ErrorCard(it, Modifier.padding(16.dp), onRetry = { vm.loadLibrary(force = true) })
+                        androidx.compose.material3.TextButton(
+                            onClick = { vm.subTab[Section.Library] = 1 },
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                        ) { Text("Sans réseau ? Ouvrir les albums hors ligne") }
+                    }
+                } }
                 if (!vm.libraryLoading && vm.libraryError == null && vm.libraries.isEmpty()) {
                     item { EmptyState("Aucune bibliothèque", "Créez-en une dans l'interface web de Bullarr.") }
                 }

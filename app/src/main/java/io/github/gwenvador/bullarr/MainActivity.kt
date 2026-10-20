@@ -45,6 +45,7 @@ import io.github.gwenvador.bullarr.ui.LibraryScreen
 import io.github.gwenvador.bullarr.ui.LoginScreen
 import io.github.gwenvador.bullarr.ui.MonitorScreen
 import io.github.gwenvador.bullarr.ui.NewsScreen
+import io.github.gwenvador.bullarr.ui.OfflineScreen
 import io.github.gwenvador.bullarr.ui.ReaderScreen
 import io.github.gwenvador.bullarr.ui.SearchScreen
 import io.github.gwenvador.bullarr.ui.Section
@@ -111,7 +112,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                         }
                         Box(Modifier.fillMaxSize()) {
                             when (section) {
-                                Section.Library -> LibraryScreen(vm) { vm.openSeries = it }
+                                Section.Library -> if (sub == 0) LibraryScreen(vm) { vm.openSeries = it } else OfflineScreen(vm)
                                 Section.Search -> SearchScreen(vm)
                                 Section.Tracking -> when (sub) {
                                     0 -> ActivityScreen(vm, snackbar)

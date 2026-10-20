@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 /** Les 5 rubriques de la barre latérale de Bullarr (nav.js : Suivi et Actions sont des groupes). */
 enum class Section(val label: String, val icon: ImageVector, val subs: List<String>) {
-    Library("Bibliothèque", Icons.Outlined.CollectionsBookmark, emptyList()),
+    Library("Bibliothèque", Icons.Outlined.CollectionsBookmark, listOf("Séries", "Hors ligne")),
     Search("Recherche", Icons.Outlined.Search, emptyList()),
     Tracking("Suivi", Icons.Outlined.Timeline, listOf("Activité", "Import", "Nouveautés", "Historique")),
     Actions("Actions", Icons.Outlined.Build, listOf("Enrichir", "Surveillance", "Vérification")),

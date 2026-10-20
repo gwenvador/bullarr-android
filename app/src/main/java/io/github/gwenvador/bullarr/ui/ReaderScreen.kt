@@ -68,6 +68,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.gwenvador.bullarr.data.BullarrApi
+import io.github.gwenvador.bullarr.data.OfflineStore
 import io.github.gwenvador.bullarr.data.PageCache
 import io.github.gwenvador.bullarr.data.ReaderMeta
 import io.github.gwenvador.bullarr.data.parseReaderMeta
@@ -121,7 +122,11 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
     var attempt by remember { mutableIntStateOf(0) }
     LaunchedEffect(target.volumeId, attempt) {
         error = null
-        try { meta = parseReaderMeta(target.volumeId, api.getObject("api/volumes/${target.volumeId}/reader")) }
+        try {
+            // Copie hors ligne : le lecteur démarre sans réseau.
+            meta = vm.offline.store.metaOf(target.volumeId)
+                ?: parseReaderMeta(target.volumeId, api.getObject("api/volumes/${target.volumeId}/reader"))
+        }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.readable() }
     }
@@ -129,7 +134,7 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         val m = meta
         when {
-            m != null -> Reader(api, m, Progress(context), onClose)
+            m != null -> Reader(api, vm.offline.store, m, Progress(context), onClose)
             else -> {
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     if (error == null) CircularProgressIndicator(color = Color.White)
@@ -147,7 +152,7 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
 }
 
 @Composable
-private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClose: () -> Unit) {
+private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, progress: Progress, onClose: () -> Unit) {
     val total = meta.pageCount
     if (total <= 0) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -175,7 +180,7 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
     // Précharge d'abord la page courante, puis les 2 suivantes (et la précédente pour revenir).
     LaunchedEffect(current) {
         for (i in listOf(current, current + 1, current + 2, current - 1)) {
-            if (i in 0 until total) launch { runCatching { PageCache.get(api, meta.volumeId, i + 1) } }
+            if (i in 0 until total) launch { runCatching { PageCache.get(api, meta.volumeId, i + 1, offline) } }
         }
     }
 
@@ -198,7 +203,7 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
     ) {
         // Les 2 pages suivantes sont déjà composées : le glissement n'attend rien.
         HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, beyondViewportPageCount = 2, key = { it }) { index ->
-            PageView(api, meta.volumeId, index + 1, isCurrent = index == pager.currentPage, fitWidth = fitWidth) { zoomed = it }
+            PageView(api, offline, meta.volumeId, index + 1, isCurrent = index == pager.currentPage, fitWidth = fitWidth) { zoomed = it }
         }
 
         AnimatedVisibility(bars, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
@@ -253,14 +258,14 @@ private fun Reader(api: BullarrApi, meta: ReaderMeta, progress: Progress, onClos
 
 /** Une page : chargement, erreur lisible avec réessai, zoom par pincement (jusqu'à ×5) puis déplacement. */
 @Composable
-private fun PageView(api: BullarrApi, volumeId: Int, page: Int, isCurrent: Boolean, fitWidth: Boolean, onZoom: (Boolean) -> Unit) {
+private fun PageView(api: BullarrApi, offline: OfflineStore, volumeId: Int, page: Int, isCurrent: Boolean, fitWidth: Boolean, onZoom: (Boolean) -> Unit) {
     var bitmap by remember(volumeId, page) { mutableStateOf(PageCache.cached(volumeId, page)) }
     var error by remember(volumeId, page) { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     LaunchedEffect(volumeId, page, attempt) {
         if (bitmap != null) return@LaunchedEffect
         error = null
-        try { bitmap = PageCache.get(api, volumeId, page) }
+        try { bitmap = PageCache.get(api, volumeId, page, offline) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = "Page $page : ${e.readable()}" }
     }

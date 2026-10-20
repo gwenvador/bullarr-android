@@ -34,6 +34,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val search = SearchState(viewModelScope) { api }
 
+    /** Albums copiés pour la lecture hors ligne. */
+    val offline = io.github.gwenvador.bullarr.data.OfflineManager(viewModelScope, { api }, io.github.gwenvador.bullarr.data.OfflineStore(app))
+
     /** Tome ouvert dans le lecteur plein écran, par-dessus toute l'app. */
     var reading by mutableStateOf<ReaderTarget?>(null)
 
