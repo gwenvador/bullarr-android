@@ -48,10 +48,9 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Bibliothèque", style = MaterialTheme.typography.headlineSmall)
-            ClearableField(
+            CompactSearchField(
                 value = q, onValueChange = { vm.query = it },
                 placeholder = "Rechercher une série, un auteur…",
-                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth(),
             )
             if (vm.libraries.size > 1) {

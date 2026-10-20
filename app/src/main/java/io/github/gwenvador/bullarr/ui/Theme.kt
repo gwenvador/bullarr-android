@@ -219,10 +219,19 @@ fun ClearableField(
 
 /** Champ de recherche compact (40 dp) : loupe, texte, croix pour effacer. Pour les listes denses. */
 @Composable
-fun CompactSearchField(value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+fun CompactSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    showIcon: Boolean = true,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+) {
     val cs = MaterialTheme.colorScheme
     androidx.compose.foundation.text.BasicTextField(
         value = value, onValueChange = onValueChange, singleLine = true,
+        keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = cs.onSurface),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(cs.primary),
         modifier = modifier.fillMaxWidth().height(40.dp),
@@ -231,8 +240,10 @@ fun CompactSearchField(value: String, onValueChange: (String) -> Unit, placehold
                 Modifier.fillMaxSize().background(cs.surfaceVariant, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Outlined.Search, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
+                if (showIcon) {
+                    Icon(Icons.Outlined.Search, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1)
                     inner()

@@ -232,8 +232,7 @@ fun MonitorScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ClearableField(query, { query = it }, Modifier.fillMaxWidth(), placeholder = "Filtrer les séries…",
-                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) })
+                    CompactSearchField(query, { query = it }, "Filtrer les séries…", Modifier.fillMaxWidth())
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = onlyEnabled, onClick = { onlyEnabled = true }, label = { Text("Surveillées (${list.orEmpty().count { it.enabled }})") })
                         FilterChip(selected = !onlyEnabled, onClick = { onlyEnabled = false }, label = { Text("Toutes (${list.orEmpty().size})") })

@@ -93,19 +93,19 @@ fun SearchScreen(vm: AppViewModel) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                ClearableField(
+                CompactSearchField(
                     value = s.title, onValueChange = { s.title = it },
-                    label = "Série ou titre",
+                    placeholder = "Série ou titre…",
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); s.search() }),
                     modifier = Modifier.weight(1f),
                 )
-                ClearableField(
+                CompactSearchField(
                     value = s.volume, onValueChange = { v -> s.volume = v.filter { it.isDigit() }.take(4) },
-                    label = "Tome",
+                    placeholder = "Tome", showIcon = false,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); s.search() }),
-                    modifier = Modifier.width(112.dp),
+                    modifier = Modifier.width(88.dp),
                 )
             }
         }

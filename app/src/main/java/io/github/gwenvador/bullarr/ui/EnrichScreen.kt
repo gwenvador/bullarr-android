@@ -208,10 +208,8 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
             }
             tab == 4 -> {
                 var draft by rememberSaveable { mutableStateOf(authorQuery) }
-                ClearableField(
-                    draft, { draft = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    placeholder = "Nom d'un auteur…",
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                CompactSearchField(
+                    draft, { draft = it }, "Nom d'un auteur…", Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); authorQuery = draft }),
                 )
