@@ -20,7 +20,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.MenuBook
@@ -68,6 +70,24 @@ fun OfflineScreen(vm: AppViewModel) {
     val items = remember(all, query) {
         if (terms.isEmpty()) all else all.filter { it.searchKey().let { k -> terms.all { t -> t in k } } }
     }
+    // Une section repliable par série ; pendant une recherche, tout est déplié.
+    var sort by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("alpha") }
+    val groups = remember(items, sort) {
+        val grouped = items.groupBy { it.meta.seriesId?.toString() ?: it.meta.seriesTitle ?: "?" }.map { (k, v) ->
+            val inside = when (sort) {
+                "date" -> v.sortedByDescending { it.savedAt }
+                "size" -> v.sortedByDescending { it.sizeBytes }
+                else -> v.sortedWith(compareBy({ numberOf(it.meta.label) }, { it.meta.label ?: "" }))
+            }
+            OfflineGroup(k, v.first().meta.seriesTitle ?: "Autres", inside)
+        }
+        when (sort) {
+            "date" -> grouped.sortedByDescending { g -> g.items.maxOf { it.savedAt } }
+            "size" -> grouped.sortedByDescending { g -> g.items.sumOf { it.sizeBytes } }
+            else -> grouped.sortedBy { normalize(it.title) }
+        }
+    }
+    val closed = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
     var toDelete by remember { mutableStateOf<OfflineStore.Item?>(null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
@@ -78,6 +98,14 @@ fun OfflineScreen(vm: AppViewModel) {
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
             )
+        }
+        if (all.isNotEmpty()) item {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Trier :", style = MaterialTheme.typography.labelLarge)
+                listOf("alpha" to "A–Z", "date" to "Date", "size" to "Taille").forEach { (k, l) ->
+                    androidx.compose.material3.FilterChip(selected = sort == k, onClick = { sort = k }, label = { Text(l) })
+                }
+            }
         }
         item {
             val total = items.sumOf { it.sizeBytes }
@@ -114,8 +142,21 @@ fun OfflineScreen(vm: AppViewModel) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
-        if (items.isNotEmpty()) item { Text("Téléchargés", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)) }
-        items(items, key = { it.meta.volumeId }) { it ->
+        groups.forEach { g ->
+        val open = terms.isNotEmpty() || !(closed[g.key] ?: (groups.size > 4))
+        item(key = "g-${g.key}") {
+            Row(
+                Modifier.fillMaxWidth().clickable { closed[g.key] = open }.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (open) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, contentDescription = if (open) "Replier" else "Déplier")
+                Spacer(Modifier.width(8.dp))
+                Text(g.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${g.items.size} · ${formatBytes(g.items.sumOf { it.sizeBytes }) ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+        if (open) items(g.items, key = { it.meta.volumeId }) { it ->
             val title = listOfNotNull(it.meta.seriesTitle, it.meta.label?.takeIf { l -> l.isNotBlank() }).joinToString(" · ").ifBlank { it.meta.title ?: "Album ${it.meta.volumeId}" }
             Row(
                 Modifier.fillMaxWidth().clickable { vm.reading = ReaderTarget(it.meta.volumeId, title) }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -124,8 +165,9 @@ fun OfflineScreen(vm: AppViewModel) {
                 Thumb(mgr.store.pageFile(it.meta.volumeId, 1))
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    it.meta.title?.takeIf { t -> t != it.meta.seriesTitle }?.let { t ->
+                    val rowTitle = it.meta.label?.takeIf { l -> l.isNotBlank() } ?: it.meta.title ?: title
+                    Text(rowTitle, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    it.meta.title?.takeIf { t -> t != it.meta.seriesTitle && t != rowTitle }?.let { t ->
                         Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text("${it.meta.pageCount} pages · ${formatBytes(it.sizeBytes) ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -134,6 +176,7 @@ fun OfflineScreen(vm: AppViewModel) {
                 IconButton(onClick = { toDelete = it }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer la copie") }
             }
             HorizontalDivider(Modifier.padding(start = 76.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        }
         }
         if (all.isEmpty() && mgr.active.isEmpty()) {
             item { EmptyState("Rien hors ligne", "Dans la fiche d'un tome, touchez « Télécharger hors ligne » pour le lire sans réseau.") }
@@ -315,3 +358,8 @@ fun SeriesOfflineIcon(vm: AppViewModel, volumes: List<OfflineVolume>) {
 
 private fun OfflineStore.Item.searchKey(): String =
     normalize(listOfNotNull(meta.seriesTitle, meta.label, meta.title).joinToString(" "))
+
+private data class OfflineGroup(val key: String, val title: String, val items: List<OfflineStore.Item>)
+
+/** Premier nombre d'un libellé (« Tome 12 » → 12) pour trier les albums dans l'ordre de la série. */
+private fun numberOf(label: String?): Int = label?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() } ?: Int.MAX_VALUE
