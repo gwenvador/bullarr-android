@@ -158,7 +158,28 @@ data class SeriesSummary(
     val missingCount: Int,
     val isOneshot: Boolean,
     val searchKey: String,
+    /** Champs de filtre de la bibliothèque. */
+    val isIntegral: Boolean = false,
+    val origin: String? = null,
+    val yearInt: Int? = null,
+    /** « yyyy-MM-dd HH:mm:ss » du dernier scan, tel que Bullarr le renvoie. */
+    val lastScanned: String? = null,
+    /** Tomes, intégrales, hors-séries… possédés. */
+    val volumeCount: Int = 0,
+    /** Taille totale des fichiers, si Bullarr la renvoie (`total_size`). */
+    val sizeBytes: Long? = null,
+    /** Nombre de votes Bédéthèque (`total_votes`). */
+    val votes: Int = 0,
 )
+
+/** Anciens (Europe, USA, Asie) et nouveaux (Franco-Belge, Comics, Manga) libellés d'origine de Bédéthèque → un seul jeu. */
+fun canonicalOrigin(raw: String?): String? = when (raw?.trim()?.lowercase()) {
+    null, "" -> null
+    "franco-belge", "europe" -> "Europe"
+    "comics", "usa" -> "USA"
+    "manga", "asie" -> "Asie"
+    else -> raw.trim()
+}
 
 fun coverOf(o: JSONObject): String? =
     o.str("local_cover_path") ?: o.str("bedetheque_cover_path") ?: o.str("komga_cover_path")
@@ -177,6 +198,13 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         missingCount = it.optJSONArray("missing_volumes")?.length() ?: 0,
         isOneshot = it.bool("is_oneshot") == true,
         searchKey = normalize("$title ${author ?: ""} ${it.str("universe_name") ?: ""}"),
+        isIntegral = it.bool("oneshot_is_integral") == true,
+        origin = canonicalOrigin(it.str("bedetheque_origin")),
+        yearInt = it.str("year")?.toIntOrNull(),
+        lastScanned = it.str("last_scanned"),
+        volumeCount = listOf("owned_tomes", "owned_integrals", "owned_hs", "owned_episodes", "owned_specials").sumOf { k -> it.int(k) ?: 0 },
+        sizeBytes = it.long("total_size"),
+        votes = it.int("total_votes") ?: 0,
     )
 }
 

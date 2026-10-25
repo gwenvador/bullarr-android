@@ -1,5 +1,15 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.SortByAlpha
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.FiberNew
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -32,8 +42,8 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -90,6 +100,7 @@ fun OfflineScreen(vm: AppViewModel) {
     }
     val closed = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
     var readTick by remember { mutableStateOf(0) }
+    var activeOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     var groupToDelete by remember { mutableStateOf<OfflineGroup?>(null) }
     var toDelete by remember { mutableStateOf<OfflineStore.Item?>(null) }
 
@@ -103,9 +114,9 @@ fun OfflineScreen(vm: AppViewModel) {
         }
         if (all.isNotEmpty()) item {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Trier :", style = MaterialTheme.typography.labelLarge)
-                listOf("alpha" to "A–Z", "date" to "Date", "size" to "Taille").forEach { (k, l) ->
-                    androidx.compose.material3.FilterChip(selected = sort == k, onClick = { sort = k }, label = { Text(l) })
+                Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                listOf(Triple("alpha", "Alphabétique", Icons.Outlined.SortByAlpha), Triple("date", "Date", Icons.Outlined.Schedule), Triple("size", "Taille", Icons.Outlined.Storage)).forEach { (k, l, ic) ->
+                    FilterChip(selected = sort == k, onClick = { sort = k }, label = { Icon(ic, contentDescription = l, modifier = Modifier.size(18.dp)) })
                 }
             }
         }
@@ -123,8 +134,27 @@ fun OfflineScreen(vm: AppViewModel) {
             )
         }
         if (mgr.active.isNotEmpty()) {
-            item { Text("En cours", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
-            items(mgr.active.keys.sorted(), key = { "a$it" }) { id ->
+            item {
+                Row(
+                    Modifier.fillMaxWidth().clickable { activeOpen = !activeOpen }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(if (activeOpen) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight, contentDescription = if (activeOpen) "Replier" else "Déplier")
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Outlined.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("En cours (${mgr.active.size})", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.weight(1f))
+                    val failedIds = mgr.active.filter { it.value.error != null }.keys.toList()
+                    if (failedIds.isNotEmpty()) IconButton(onClick = { failedIds.forEach { mgr.start(it, mgr.titles[it] ?: "Album $it") } }) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Tout reprendre (${failedIds.size} en erreur)", tint = MaterialTheme.colorScheme.error)
+                    }
+                    IconButton(onClick = { mgr.active.keys.toList().forEach { mgr.cancel(it) } }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Tout arrêter")
+                    }
+                }
+            }
+            if (activeOpen) items(mgr.active.keys.sorted(), key = { "a$it" }) { id ->
                 val p = mgr.active[id] ?: return@items
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -189,9 +219,9 @@ fun OfflineScreen(vm: AppViewModel) {
                             readTick++
                         }) {
                             when (st) {
-                                ReadStatus.Unread -> Tag("Non lu", cs.primaryContainer, cs.onPrimaryContainer)
-                                is ReadStatus.InProgress -> Tag("En cours · p. ${st.page + 1}/${it.meta.pageCount}", cs.tertiaryContainer, cs.onTertiaryContainer)
-                                ReadStatus.Read -> Tag("Lu", cs.surfaceVariant, cs.onSurfaceVariant)
+                                ReadStatus.Unread -> IconTag(Icons.Outlined.FiberNew, "Non lu", cs.primary, size = 22.dp)
+                                is ReadStatus.InProgress -> IconTag(Icons.Outlined.AutoStories, "En cours · page ${st.page + 1}/${it.meta.pageCount}", cs.tertiary, "${st.page + 1}/${it.meta.pageCount}")
+                                ReadStatus.Read -> IconTag(Icons.Outlined.DoneAll, "Lu", cs.onSurfaceVariant)
                             }
                         }
                         Text("${it.meta.pageCount} pages · ${formatBytes(it.sizeBytes) ?: ""}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
@@ -301,19 +331,26 @@ fun OfflineIcon(vm: AppViewModel, volumeId: Int, title: String) {
     val progress = mgr.active[volumeId]
     val done = mgr.isDownloaded(volumeId)
     var confirm by remember { mutableStateOf(false) }
+    var showError by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
+    if (showError && progress?.error != null) OfflineErrorDialog(
+        listOf(title to progress.error),
+        onRetry = { showError = false; mgr.start(volumeId, title) },
+        onDismiss = { showError = false },
+        onGiveUp = { showError = false; mgr.cancel(volumeId) },
+    )
     when {
         progress != null && progress.error == null -> IconButton(onClick = { mgr.cancel(volumeId) }) {
             Box(contentAlignment = Alignment.Center) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    progress = { if (progress.total > 0) progress.done.toFloat() / progress.total else 0f },
+                if (progress.done > 0 && progress.total > 0) androidx.compose.material3.CircularProgressIndicator(
+                    progress = { progress.done.toFloat() / progress.total },
                     modifier = Modifier.size(24.dp), strokeWidth = 2.dp,
-                )
+                ) else androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 Icon(Icons.Outlined.Close, contentDescription = "Arrêter le téléchargement", modifier = Modifier.size(12.dp))
             }
         }
-        progress != null -> IconButton(onClick = { mgr.start(volumeId, title) }) {
-            Icon(Icons.Outlined.Refresh, contentDescription = "Réessayer le téléchargement", tint = cs.error)
+        progress != null -> IconButton(onClick = { showError = true }) {
+            Icon(Icons.Outlined.ErrorOutline, contentDescription = "Téléchargement en erreur — détails", tint = cs.error)
         }
         done -> IconButton(onClick = { confirm = true }) {
             Icon(Icons.Outlined.OfflinePin, contentDescription = "Disponible hors ligne — supprimer la copie", tint = cs.primary)
@@ -348,6 +385,13 @@ fun SeriesOfflineIcon(vm: AppViewModel, volumes: List<OfflineVolume>) {
     val failed = volumes.filter { mgr.active[it.id]?.error != null }
     val todo = volumes.filter { !mgr.isDownloaded(it.id) && !mgr.active.containsKey(it.id) }
     var confirm by remember { mutableStateOf(false) }
+    var showError by remember { mutableStateOf(false) }
+    if (showError && failed.isNotEmpty()) OfflineErrorDialog(
+        failed.map { it.title to (mgr.active[it.id]?.error ?: "") },
+        onRetry = { showError = false; failed.forEach { mgr.start(it.id, it.title) } },
+        onDismiss = { showError = false },
+        onGiveUp = { showError = false; failed.forEach { mgr.cancel(it.id) } },
+    )
     // Estimation : ~1 Mo par page quand le nombre de pages est connu, 40 pages sinon.
     val estimate = todo.sumOf { (it.pages ?: 40) * 1_000_000L }
 
@@ -356,7 +400,7 @@ fun SeriesOfflineIcon(vm: AppViewModel, volumes: List<OfflineVolume>) {
             onClick = {
                 when {
                     running.isNotEmpty() -> running.forEach { mgr.cancel(it.id) }
-                    failed.isNotEmpty() -> failed.forEach { mgr.start(it.id, it.title) }
+                    failed.isNotEmpty() -> showError = true
                     else -> confirm = true
                 }
             },
@@ -366,10 +410,11 @@ fun SeriesOfflineIcon(vm: AppViewModel, volumes: List<OfflineVolume>) {
                 running.isNotEmpty() -> Box(contentAlignment = Alignment.Center) {
                     val total = volumes.sumOf { mgr.active[it.id]?.total ?: 0 }.coerceAtLeast(1)
                     val done = volumes.sumOf { mgr.active[it.id]?.done ?: 0 }
-                    androidx.compose.material3.CircularProgressIndicator(progress = { done.toFloat() / total }, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    if (done > 0) androidx.compose.material3.CircularProgressIndicator(progress = { done.toFloat() / total }, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    else androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     Icon(Icons.Outlined.Close, contentDescription = "Arrêter les téléchargements", modifier = Modifier.size(11.dp))
                 }
-                failed.isNotEmpty() -> Icon(Icons.Outlined.Refresh, contentDescription = "Réessayer les téléchargements en erreur", tint = cs.error)
+                failed.isNotEmpty() -> Icon(Icons.Outlined.ErrorOutline, contentDescription = "Téléchargements en erreur — détails", tint = cs.error)
                 todo.isEmpty() -> Icon(Icons.Outlined.OfflinePin, contentDescription = "Tous les albums sont hors ligne — supprimer les copies", tint = cs.primary)
                 else -> Icon(Icons.Outlined.DownloadForOffline, contentDescription = "Télécharger tous les albums hors ligne")
             }
@@ -403,3 +448,23 @@ private data class OfflineGroup(val key: String, val title: String, val items: L
 
 /** Premier nombre d'un libellé (« Tome 12 » → 12) pour trier les albums dans l'ordre de la série. */
 private fun numberOf(label: String?): Int = label?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() } ?: Int.MAX_VALUE
+
+/** Détail des erreurs de téléchargement (le message du serveur ou du réseau), avec réessai. */
+@Composable
+private fun OfflineErrorDialog(errors: List<Pair<String, String>>, onRetry: () -> Unit, onDismiss: () -> Unit, onGiveUp: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text(if (errors.size > 1) "${errors.size} téléchargements en erreur" else "Téléchargement en erreur") },
+        text = {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                errors.distinctBy { it.second }.take(4).forEach { (t, e) ->
+                    Text(if (errors.size > 1) "$t\n$e" else e, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (errors.map { it.second }.distinct().size > 4) Text("…", style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        confirmButton = { TextButton(onClick = onRetry) { Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.padding(end = 6.dp)); Text("Réessayer") } },
+        dismissButton = { TextButton(onClick = onGiveUp) { Text("Abandonner") } },
+    )
+}

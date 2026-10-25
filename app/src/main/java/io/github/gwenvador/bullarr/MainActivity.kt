@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Icon
+import io.github.gwenvador.bullarr.ui.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.PrimaryScrollableTabRow
@@ -32,6 +32,7 @@ import io.github.gwenvador.bullarr.ui.ConfigScreen
 import io.github.gwenvador.bullarr.ui.WebSettingsScreen
 import io.github.gwenvador.bullarr.data.CLIENTS
 import io.github.gwenvador.bullarr.data.IMPORTS
+import io.github.gwenvador.bullarr.data.ACCESS
 import io.github.gwenvador.bullarr.data.INDEXERS
 import io.github.gwenvador.bullarr.data.MONITOR
 import io.github.gwenvador.bullarr.data.NOTIFICATIONS
@@ -56,6 +57,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Android 13+ : sans cette autorisation, la notification de téléchargement reste masquée.
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         setContent { BullarrTheme { BullarrApp() } }
     }
 }
@@ -133,6 +138,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     4 -> ConfigScreen(vm, snackbar, IMPORTS)
                                     5 -> ConfigScreen(vm, snackbar, SEARCH)
                                     6 -> ConfigScreen(vm, snackbar, MONITOR)
+                                    7 -> ConfigScreen(vm, snackbar, ACCESS)
                                     else -> WebSettingsScreen(vm)
                                 }
                             }

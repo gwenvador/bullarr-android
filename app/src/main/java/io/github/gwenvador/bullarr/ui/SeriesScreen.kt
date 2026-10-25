@@ -1,5 +1,11 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ReportProblem
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,8 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -153,8 +159,16 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     val cs = MaterialTheme.colorScheme
-                    d?.status?.let { Tag(it, cs.secondaryContainer, cs.onSecondaryContainer) }
-                    if (d?.monitored == true) Tag("Surveillée", cs.primaryContainer, cs.onPrimaryContainer)
+                    d?.status?.let { st ->
+                        val l = st.lowercase()
+                        when {
+                            "cours" in l -> IconTag(Icons.Outlined.HourglassTop, "$st (série toujours publiée)", cs.tertiary)
+                            "termin" in l || "fini" in l -> IconTag(Icons.Outlined.TaskAlt, st, cs.secondary)
+                            "arrêt" in l || "stopp" in l || "abandon" in l -> IconTag(Icons.Outlined.Block, st, cs.error)
+                            else -> Tag(st, cs.secondaryContainer, cs.onSecondaryContainer)
+                        }
+                    }
+                    if (d?.monitored == true) IconTag(Icons.Outlined.Visibility, "Surveillée", cs.primary)
                     if (d != null) SeriesOfflineIcon(vm, d.volumes.filter { it.owned }.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) })
                 }
             }
@@ -186,7 +200,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, offline
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
         Spacer(Modifier.width(8.dp))
-        if (!v.owned) Tag("Manquant", cs.tertiaryContainer, cs.onTertiaryContainer)
+        if (!v.owned) IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary)
         offlineIcon?.invoke()
         if (onRead != null) IconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire ce tome", tint = cs.primary) }
         IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = "Chercher ce tome") }
@@ -216,8 +230,8 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, s
                         c("communityrating")?.let { r ->
                             Text("★ $r / 5" + (c("communityratingcount")?.let { " ($it avis)" } ?: ""), style = MaterialTheme.typography.bodyMedium, color = cs.tertiary)
                         }
-                        if (v.owned) Tag("Possédé", cs.secondaryContainer, cs.onSecondaryContainer)
-                        else Tag("Manquant", cs.tertiaryContainer, cs.onTertiaryContainer)
+                        if (v.owned) IconTag(Icons.Outlined.CheckCircle, "Possédé", cs.secondary, "Possédé")
+                        else IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary, "Manquant")
                     }
                 }
             }

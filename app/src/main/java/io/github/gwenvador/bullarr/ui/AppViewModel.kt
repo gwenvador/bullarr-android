@@ -12,6 +12,7 @@ import io.github.gwenvador.bullarr.data.SeriesSummary
 import io.github.gwenvador.bullarr.data.Settings
 import io.github.gwenvador.bullarr.data.parseLibraries
 import io.github.gwenvador.bullarr.data.parseSeriesList
+import io.github.gwenvador.bullarr.data.SessionAuth
 import io.github.gwenvador.bullarr.data.readable
 import kotlinx.coroutines.launch
 
@@ -23,12 +24,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun buildApi(): BullarrApi? =
         if (!settings.isConfigured) null
-        else runCatching { BullarrApi(settings.serverUrl, settings.apiKey) }.getOrNull()
+        else runCatching {
+            if (settings.authMode == "key") BullarrApi(settings.serverUrl, settings.apiKey)
+            else BullarrApi(settings.serverUrl, "", SessionAuth(
+                settings.sessionCookie,
+                if (settings.authMode == "password") settings.username else "",
+                if (settings.authMode == "password") settings.password else "",
+            ) { settings.sessionCookie = it })
+        }.getOrNull()
 
-    fun save(url: String, key: String) {
+    /** Enregistre le serveur et le mode d'accès ; [cookie] = session déjà ouverte (identifiant ou SSO). */
+    fun save(url: String, key: String, mode: String = "key", user: String = "", pass: String = "", cookie: String = "") {
         settings.serverUrl = url.trim()
-        settings.apiKey = key.trim()
+        settings.apiKey = if (mode == "key") key.trim() else ""
+        settings.authMode = mode
+        settings.username = user.trim()
+        settings.password = pass
+        settings.sessionCookie = cookie
         api = buildApi()
+        libraries = emptyList(); series = emptyList(); libraryError = null; selectedLibrary = null
+    }
+
+    /** Oublie la clé, la session et les identifiants (et prévient Bullarr si une session était ouverte). */
+    fun logout() {
+        val old = api
+        val hadSession = settings.authMode != "key" && settings.sessionCookie.isNotBlank()
+        settings.lastUrl = settings.serverUrl
+        if (hadSession && old != null) {
+            val cookie = settings.sessionCookie
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    BullarrApi.client.newCall(okhttp3.Request.Builder().url(old.absoluteUrl("logout")).header("Cookie", cookie).build()).execute().close()
+                }
+            }
+        }
+        runCatching { android.webkit.CookieManager.getInstance().removeAllCookies(null) }
+        settings.serverUrl = ""; settings.apiKey = ""; settings.authMode = "key"
+        settings.username = ""; settings.password = ""; settings.sessionCookie = ""
+        api = null
         libraries = emptyList(); series = emptyList(); libraryError = null; selectedLibrary = null
     }
 
@@ -62,7 +95,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Albums copiés pour la lecture hors ligne. */
-    val offline = io.github.gwenvador.bullarr.data.OfflineManager(viewModelScope, { api }, io.github.gwenvador.bullarr.data.OfflineStore(app))
+    /** Portée propre à l'app (pas au ViewModel) : les téléchargements survivent à la fermeture de l'écran. */
+    val offline = io.github.gwenvador.bullarr.data.OfflineManager(
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate),
+        { api }, io.github.gwenvador.bullarr.data.OfflineStore(app),
+    ).also { io.github.gwenvador.bullarr.data.DownloadService.manager = it }
+
+    init {
+        // Démarre le service au premier plan dès qu'un téléchargement tourne.
+        viewModelScope.launch {
+            androidx.compose.runtime.snapshotFlow { offline.active.values.any { it.error == null } }
+                .collect { running -> if (running) io.github.gwenvador.bullarr.data.DownloadService.start(app) }
+        }
+    }
 
     /** Tome ouvert dans le lecteur plein écran, par-dessus toute l'app. */
     var reading by mutableStateOf<ReaderTarget?>(null)
@@ -90,6 +135,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var libraryLoading by mutableStateOf(false); private set
     var libraryError by mutableStateOf<String?>(null); private set
     var query by mutableStateOf("")
+    var filters by mutableStateOf(LibraryFilters())
+    var sort by mutableStateOf(LibrarySort.Title)
+    var sortDesc by mutableStateOf(false)
 
     fun loadLibrary(force: Boolean = false, library: Library? = selectedLibrary) {
         val client = api ?: return

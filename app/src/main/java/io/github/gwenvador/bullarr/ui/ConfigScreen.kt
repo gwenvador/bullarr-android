@@ -1,5 +1,6 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,10 +28,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import io.github.gwenvador.bullarr.ui.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
@@ -164,7 +165,7 @@ private fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigEd
                 }
                 if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, color = if (e.loadError != null) cs.error else cs.onSurfaceVariant)
             }
-            if (o != null && hasEnabled) Tag(if (enabled == true) "ON" else "OFF", if (enabled == true) cs.secondaryContainer else cs.surfaceVariant, if (enabled == true) cs.onSecondaryContainer else cs.onSurfaceVariant)
+            if (o != null && hasEnabled) IconTag(Icons.Outlined.PowerSettingsNew, if (enabled == true) "Activé" else "Désactivé", if (enabled == true) cs.secondary else cs.outline, size = 22.dp)
             Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = if (expanded) "Replier" else "Déplier")
         }
         if (!expanded) return@Card
@@ -279,11 +280,10 @@ private fun FieldEditor(f: Field, e: ConfigEditor, o: JSONObject) {
 
 // Réglages qui n'ont pas (encore) d'éditeur dans l'app : ils s'ouvrent dans l'interface web.
 private val WEB_SETTINGS = listOf(
-    "indexeurs" to "EBDZ : identifiants, forums, scraping automatique",
+    "indexeurs" to "EBDZ : choix des forums à indexer",
     "indexeurs" to "Canaux Telegram : compte, canaux, indexation",
-    "oidc" to "Login (SSO, mot de passe) et clé API",
-    "libraries" to "Format de renommage",
-    "backup" to "Sauvegarde et restauration",
+    "oidc" to "Clé API de Bullarr (affichage et régénération)",
+    "backup" to "Sauvegarde et restauration (contient les secrets)",
 )
 
 @Composable
@@ -292,7 +292,7 @@ fun WebSettingsScreen(vm: AppViewModel) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
         item {
             Text(
-                "Ces réglages se modifient dans l'interface web de Bullarr : ils touchent à la sécurité ou ont des options trop riches pour le téléphone.",
+                "Ces réglages se modifient dans l'interface web de Bullarr : connexion Telegram par code, fichiers de sauvegarde et clé API ne se prêtent pas au téléphone.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
             )

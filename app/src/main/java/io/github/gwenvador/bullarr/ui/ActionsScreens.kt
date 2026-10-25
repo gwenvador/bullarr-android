@@ -1,5 +1,13 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.MoveToInbox
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,10 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.FilterChip
+import io.github.gwenvador.bullarr.ui.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -78,8 +86,8 @@ private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Tag(r.kind, cs.surfaceVariant, cs.onSurfaceVariant)
             when (r.ok) {
-                true -> Tag("OK", cs.secondaryContainer, cs.onSecondaryContainer)
-                false -> Tag("Échec", cs.errorContainer, cs.onErrorContainer)
+                true -> IconTag(Icons.Outlined.CheckCircle, "OK", cs.secondary)
+                false -> IconTag(Icons.Outlined.ErrorOutline, "Échec", cs.error)
                 null -> {}
             }
             r.date?.let { Text(it.take(16), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
@@ -170,8 +178,18 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     PullToRefreshBox(isRefreshing = loading && rows != null, onRefresh = { scope.launch { load() } }, modifier = Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             item {
-                FlowRow(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    filters.forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) }
+                // Une seule ligne, icônes seules (libellé lu par TalkBack).
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    filters.forEach { f ->
+                        val ic = when (f) {
+                            "Import" -> Icons.Outlined.MoveToInbox
+                            "Téléchargement" -> Icons.Outlined.Download
+                            "Actions" -> Icons.Outlined.Bolt
+                            else -> Icons.Outlined.Apps
+                        }
+                        FilterChip(selected = filter == f, onClick = { filter = f }, modifier = Modifier.weight(1f),
+                            label = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Icon(ic, contentDescription = f, modifier = Modifier.size(20.dp)) } })
+                    }
                 }
             }
             if (loading && rows == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

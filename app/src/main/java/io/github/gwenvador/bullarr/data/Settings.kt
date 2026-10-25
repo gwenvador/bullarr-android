@@ -28,10 +28,37 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_API, "") ?: ""
         set(value) = prefs.edit().putString(KEY_API, value).apply()
 
+    /** "key" (clé API), "password" (identifiant) ou "oidc" (SSO). */
+    var authMode: String
+        get() = prefs.getString(KEY_MODE, "key") ?: "key"
+        set(value) = prefs.edit().putString(KEY_MODE, value).apply()
+
+    var username: String
+        get() = prefs.getString(KEY_USER, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_USER, value).apply()
+
+    var password: String
+        get() = prefs.getString(KEY_PASS, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_PASS, value).apply()
+
+    var sessionCookie: String
+        get() = prefs.getString(KEY_COOKIE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_COOKIE, value).apply()
+
+    /** Dernière URL utilisée, gardée après une déconnexion pour préremplir l'écran de connexion. */
+    var lastUrl: String
+        get() = prefs.getString(KEY_LAST, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAST, value).apply()
+
     val isConfigured: Boolean get() = serverUrl.isNotBlank()
 
     private companion object {
         const val KEY_URL = "server_url"
         const val KEY_API = "api_key"
+        const val KEY_LAST = "last_url"
+        const val KEY_MODE = "auth_mode"
+        const val KEY_USER = "username"
+        const val KEY_PASS = "password"
+        const val KEY_COOKIE = "session_cookie"
     }
 }

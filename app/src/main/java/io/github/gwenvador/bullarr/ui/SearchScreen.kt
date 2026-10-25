@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
@@ -23,19 +24,20 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.ImeAction
@@ -107,24 +109,28 @@ fun SearchScreen(vm: AppViewModel) {
                     keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); s.search() }),
                     modifier = Modifier.width(88.dp),
                 )
-            }
-        }
-        item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SEARCH_SOURCES.forEach { (key, label) ->
-                    val count = (s.sources[key] as? SourceState.Done)?.results?.size
-                    FilterChip(
-                        selected = s.enabledSources[key] == true,
-                        onClick = { s.enabledSources[key] = s.enabledSources[key] != true },
-                        label = { Text(if (count != null) "$label ($count)" else label) },
-                    )
+                IconButton(onClick = { focus.clearFocus(); s.search() }, enabled = s.title.isNotBlank()) {
+                    Icon(Icons.Outlined.Search, contentDescription = "Rechercher")
                 }
             }
         }
         item {
-            Button(onClick = { focus.clearFocus(); s.search() }, enabled = s.title.isNotBlank()) {
-                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                Text("Rechercher")
+            // Une seule ligne : logos sans contour, atténués quand la source est désactivée.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                SEARCH_SOURCES.forEach { (key, label) ->
+                    val count = (s.sources[key] as? SourceState.Done)?.results?.size
+                    val on = s.enabledSources[key] == true
+                    Row(
+                        Modifier.clip(RoundedCornerShape(8.dp))
+                            .clickable { s.enabledSources[key] = !on }
+                            .alpha(if (on) 1f else 0.3f)
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Logo(key, label, 26.dp, tip = false)
+                        if (count != null) Text("$count", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
         if (s.lastQuery == null) {
@@ -145,6 +151,7 @@ fun SearchScreen(vm: AppViewModel) {
                         contentDescription = if (closed) "Déplier $label" else "Replier $label",
                         modifier = Modifier.padding(end = 4.dp),
                     )
+                    Logo(key, label, 22.dp, Modifier.padding(end = 8.dp))
                     Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     when (state) {
                         SourceState.Loading -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -191,7 +198,10 @@ private fun ResultRow(r: SearchResult, sentTo: String?, onDownload: (() -> Unit)
             val meta = listOfNotNull(r.volumeLabel, formatBytes(r.sizeBytes), r.detail).joinToString(" · ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             r.unconfirmed?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.tertiary) }
-            if (sentTo != null) Tag("Envoyé à $sentTo", cs.secondaryContainer, cs.onSecondaryContainer)
+            if (sentTo != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatusIcon(Icons.AutoMirrored.Outlined.Send, "Envoyé à $sentTo", cs.secondary, 16.dp)
+                Logo(logoKey(sentTo), "Envoyé à $sentTo", 16.dp)
+            }
         }
         if (onOpen != null) IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = "Voir la source") }
         if (onDownload != null) IconButton(onClick = onDownload, enabled = sentTo == null) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger") }

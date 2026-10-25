@@ -37,9 +37,10 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
   qBittorrent, rTorrent, Deluge, Shelfmark, Komga), Notifications (bot Telegram), Imports,
   Recherche (ordre des sources, extensions, création de séries, recherche automatique),
   Surveillance. Chaque carte a un bouton Enregistrer et, quand l'API le permet, Tester.
-  Le dernier onglet, Web, ouvre dans le navigateur ce qui n'est pas dans l'app : EBDZ
-  (identifiants et forums), canaux Telegram, Login/SSO et clé API, format de renommage,
-  sauvegarde.
+  Indexeurs inclut le compte EBDZ et son scraping automatique, Imports le format de
+  renommage, Accès la connexion à Bullarr (mot de passe, SSO). Le dernier onglet, Web,
+  ouvre dans le navigateur ce qui n'est pas dans l'app : forums EBDZ, canaux Telegram,
+  clé API, sauvegarde.
 
 Dans Nouveautés, chaque ligne a un bouton Télécharger et un menu : ⚡ « Ajouter la série et
 télécharger » (comme sur la page web), ouvrir la série, ouvrir la source, copier le lien,

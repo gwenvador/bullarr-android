@@ -2,6 +2,7 @@ package io.github.gwenvador.bullarr.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -22,12 +23,22 @@ import javax.net.ssl.SSLException
 /** Erreur destinée à l'utilisateur : [message] est déjà lisible, en français. */
 class ApiException(message: String, val httpCode: Int? = null) : Exception(message)
 
+/** Session ouverte par identifiant/mot de passe ou SSO : cookie Flask, jeton CSRF, identifiants pour se reconnecter. */
+class SessionAuth(
+    @Volatile var cookie: String,
+    val username: String = "",
+    val password: String = "",
+    val onCookie: (String) -> Unit = {},
+) {
+    @Volatile var csrf: String? = null
+}
+
 /**
  * Client des routes /api/ de Bullarr. La clé part dans l'en-tête X-Api-Key ; Accept:
  * application/json fait renvoyer à Bullarr un 401 JSON plutôt qu'une redirection vers
  * la page de connexion quand la clé manque.
  */
-class BullarrApi(rawBaseUrl: String, private val apiKey: String) {
+class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val session: SessionAuth? = null) {
 
     val baseUrl: HttpUrl = normalizeBaseUrl(rawBaseUrl)
 
@@ -54,10 +65,12 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String) {
             ?: throw ApiException("DELETE $path : réponse inattendue (un objet JSON était attendu).")
 
     /** Image binaire (page du lecteur). Une réponse JSON d'erreur devient une ApiException lisible. */
-    suspend fun getBytes(path: String): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun getBytes(path: String): ByteArray = withAuthRetry { getBytesOnce(path) }
+
+    private suspend fun getBytesOnce(path: String): ByteArray = withContext(Dispatchers.IO) {
         val url = baseUrl.newBuilder().addPathSegments(path.trimStart('/')).build()
         val builder = Request.Builder().url(url).header("Accept", "image/*")
-        if (apiKey.isNotBlank()) builder.header("X-Api-Key", apiKey.trim())
+        applyAuth(builder, "GET")
         val label = "GET /${path.trimStart('/')}"
         val response = try {
             client.newCall(builder.build()).execute()
@@ -75,7 +88,7 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String) {
             val detail = runCatching { extractError(JSONObject(text)) }.getOrNull()
                 ?: if (resp.isSuccessful) "réponse inattendue (type $type au lieu d'une image)" else "erreur HTTP ${resp.code}"
             val hint = when (resp.code) {
-                401 -> "\nVérifiez la clé API (Configuration → Connexion)."
+                401 -> "\nVérifiez la clé API ou la session (Configuration → Connexion)."
                 in 500..599 -> "\nErreur interne de Bullarr (HTTP ${resp.code})."
                 else -> ""
             }
@@ -84,13 +97,95 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String) {
     }
 
     private suspend fun execute(method: String, path: String, query: Map<String, String>, body: JSONObject?): Any =
+        withAuthRetry { executeOnce(method, path, query, body) }
+
+    /**
+     * Session (identifiant ou SSO) : un 401 relance une connexion par mot de passe si les
+     * identifiants sont connus ; un 403 « jeton de sécurité » redemande le jeton CSRF.
+     */
+    private suspend fun <T> withAuthRetry(block: suspend () -> T): T = try {
+        block()
+    } catch (e: ApiException) {
+        val s = session
+        if (s == null || apiKey.isNotBlank()) throw e
+        when {
+            e.httpCode == 401 && s.username.isNotBlank() && s.password.isNotBlank() -> {
+                loginPassword(s.username, s.password); block()
+            }
+            e.httpCode == 403 && e.message.orEmpty().contains("sécurité") -> { s.csrf = null; block() }
+            e.httpCode == 401 -> throw ApiException(
+                (e.message ?: "") + "\nSession expirée : reconnectez-vous (Configuration → Connexion).", 401)
+            else -> throw e
+        }
+    }
+
+    /** Connexion par formulaire (POST /login/password) ; renvoie le cookie de session et le mémorise. */
+    suspend fun loginPassword(username: String, password: String): String = withContext(Dispatchers.IO) {
+        val url = baseUrl.newBuilder().addPathSegments("login/password").build()
+        val request = Request.Builder().url(url)
+            .post(FormBody.Builder().add("username", username.trim()).add("password", password).build())
+            .build()
+        val resp = try {
+            client.newBuilder().followRedirects(false).build().newCall(request).execute()
+        } catch (e: IOException) {
+            throw ApiException(networkMessage(e, url))
+        }
+        resp.use { r ->
+            when {
+                r.code == 401 && authDisabled() -> throw ApiException(
+                    "L'authentification est désactivée sur ce serveur : aucune connexion n'est nécessaire. " +
+                        "Choisissez « Clé API », laissez la clé vide et enregistrez.", 401)
+                r.code == 401 -> throw ApiException(
+                    "POST /login/password : identifiant ou mot de passe incorrect, ou connexion par mot de passe " +
+                        "désactivée sur le serveur (Paramètres → Login).", 401)
+                !r.isRedirect -> throw ApiException("POST /login/password : réponse inattendue (HTTP ${r.code}).", r.code)
+            }
+            val cookie = r.headers("Set-Cookie").joinToString("; ") { it.substringBefore(';') }
+            if (cookie.isBlank()) throw ApiException("POST /login/password : le serveur n'a renvoyé aucun cookie de session.")
+            session?.let { it.cookie = cookie; it.csrf = null; it.onCookie(cookie) }
+            cookie
+        }
+    }
+
+    /** Vrai si l'API répond sans aucun identifiant (authentification désactivée côté Bullarr). */
+    private fun authDisabled(): Boolean = try {
+        val req = Request.Builder().url(baseUrl.newBuilder().addPathSegments("api/libraries").build()).header("Accept", "application/json").build()
+        client.newCall(req).execute().use { it.isSuccessful }
+    } catch (_: IOException) { false }
+
+    /** Ajoute l'authentification : clé API, sinon cookie de session (+ jeton CSRF hors lecture). */
+    private fun applyAuth(builder: Request.Builder, method: String) {
+        if (apiKey.isNotBlank()) { builder.header("X-Api-Key", apiKey.trim()); return }
+        val s = session ?: return
+        if (s.cookie.isBlank()) return
+        builder.header("Cookie", s.cookie)
+        if (method != "GET" && method != "HEAD") {
+            val token = s.csrf ?: fetchCsrf(s).also { s.csrf = it }
+            builder.header("X-CSRF-Token", token)
+        }
+    }
+
+    private fun fetchCsrf(s: SessionAuth): String {
+        val url = baseUrl.newBuilder().addPathSegments("api/auth/csrf").build()
+        val req = Request.Builder().url(url).header("Accept", "application/json").header("Cookie", s.cookie).build()
+        try {
+            client.newCall(req).execute().use { r ->
+                val body = r.body?.string().orEmpty()
+                if (!r.isSuccessful) throw ApiException("GET /api/auth/csrf : HTTP ${r.code}", r.code)
+                return JSONObject(body).optString("token").ifBlank { throw ApiException("GET /api/auth/csrf : jeton absent.") }
+            }
+        } catch (e: IOException) { throw ApiException(networkMessage(e, url)) }
+        catch (e: JSONException) { throw ApiException("GET /api/auth/csrf : réponse illisible.") }
+    }
+
+    private suspend fun executeOnce(method: String, path: String, query: Map<String, String>, body: JSONObject?): Any =
         withContext(Dispatchers.IO) {
             val url = baseUrl.newBuilder().apply {
                 addPathSegments(path.trimStart('/'))
                 query.forEach { (k, v) -> addQueryParameter(k, v) }
             }.build()
             val builder = Request.Builder().url(url).header("Accept", "application/json")
-            if (apiKey.isNotBlank()) builder.header("X-Api-Key", apiKey.trim())
+            applyAuth(builder, method)
             if (body != null) builder.method(method, body.toString().toRequestBody(JSON))
             else builder.method(method, null)
 

@@ -1,5 +1,8 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.material.icons.outlined.ReportProblem
+import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.Book
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,16 +19,27 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.FilterChip
+import io.github.gwenvador.bullarr.ui.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.SortByAlpha
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -40,19 +54,56 @@ import io.github.gwenvador.bullarr.data.normalize
 fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
     LaunchedEffect(vm.api) { vm.loadLibrary() }
     val q = vm.query
-    val filtered = remember(vm.series, q) {
+    val filters = vm.filters
+    // remember : sans lui, l'état était recréé à chaque recomposition et la feuille ne s'ouvrait jamais.
+    var sheet by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val filtered = remember(vm.series, q, filters, vm.sort, vm.sortDesc) {
         val terms = normalize(q).split(' ').filter { it.isNotBlank() }
-        if (terms.isEmpty()) vm.series else vm.series.filter { s -> terms.all { it in s.searchKey } }
+        vm.sort.sorted(vm.series.filter { s -> (terms.isEmpty() || terms.all { it in s.searchKey }) && filters.matches(s) }, vm.sortDesc)
     }
+    var sortMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Bibliothèque", style = MaterialTheme.typography.headlineSmall)
-            CompactSearchField(
-                value = q, onValueChange = { vm.query = it },
-                placeholder = "Rechercher une série, un auteur…",
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                CompactSearchField(
+                    value = q, onValueChange = { vm.query = it },
+                    placeholder = "Rechercher une série, un auteur…",
+                    modifier = Modifier.weight(1f),
+                )
+                Box {
+                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier") }
+                    androidx.compose.material3.DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        LibrarySort.entries.forEach { o ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(o.label) },
+                                leadingIcon = { Icon(when (o) {
+                                    LibrarySort.Title -> Icons.Outlined.SortByAlpha
+                                    LibrarySort.Popularity -> Icons.Outlined.ThumbUp
+                                    LibrarySort.Date -> Icons.Outlined.Schedule
+                                    LibrarySort.Size -> Icons.Outlined.Storage
+                                }, contentDescription = null) },
+                                trailingIcon = {
+                                    if (vm.sort == o) Icon(if (vm.sortDesc) Icons.Outlined.ArrowDownward else Icons.Outlined.ArrowUpward, contentDescription = if (vm.sortDesc) "Décroissant" else "Croissant")
+                                },
+                                // Même critère : inverse l'ordre ; sinon ordre par défaut du critère.
+                                onClick = {
+                                    if (vm.sort == o) vm.sortDesc = !vm.sortDesc else { vm.sort = o; vm.sortDesc = o.defaultDesc }
+                                    sortMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                // Bouton de filtres, avec le nombre de groupes actifs.
+                androidx.compose.material3.BadgedBox(badge = {
+                    if (filters.activeCount > 0) androidx.compose.material3.Badge { Text("${filters.activeCount}") }
+                }) {
+                    IconButton(onClick = { sheet = true }) {
+                        Icon(Icons.Outlined.FilterList, contentDescription = "Filtres")
+                    }
+                }
+            }
             if (vm.libraries.size > 1) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(vm.libraries, key = { it.id }) { lib ->
@@ -67,6 +118,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 )
             }
         }
+        if (sheet) LibraryFilterSheet(vm.series, filters, filtered.size, onChange = { vm.filters = it }, onDismiss = { sheet = false })
         if (vm.libraryLoading && vm.series.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
 
         PullToRefreshBox(
@@ -87,7 +139,12 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 if (!vm.libraryLoading && vm.libraryError == null && vm.libraries.isEmpty()) {
                     item { EmptyState("Aucune bibliothèque", "Créez-en une dans l'interface web de Bullarr.") }
                 }
-                if (filtered.isEmpty() && vm.series.isNotEmpty()) item { EmptyState("Aucun résultat", "pour « $q »") }
+                if (filtered.isEmpty() && vm.series.isNotEmpty()) item {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        EmptyState("Aucun résultat", if (q.isNotBlank()) "pour « $q »" + (if (!filters.isEmpty) " avec ces filtres" else "") else "Aucune série ne correspond aux filtres.")
+                        if (!filters.isEmpty) androidx.compose.material3.TextButton(onClick = { vm.filters = LibraryFilters() }) { Text("Réinitialiser les filtres") }
+                    }
+                }
                 items(filtered, key = { it.id }) { s ->
                     SeriesRow(s, vm.coverUrl(s.coverPath)) { onOpen(s) }
                     HorizontalDivider(Modifier.padding(start = 84.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -109,11 +166,13 @@ private fun SeriesRow(s: SeriesSummary, cover: String?, onClick: () -> Unit) {
             Text(s.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val meta = listOfNotNull(s.author, s.year).joinToString(" · ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 val cs = MaterialTheme.colorScheme
+                s.origin?.let { Logo(it.lowercase(), it, 20.dp) }
                 val count = if (s.isOneshot) "One-shot" else s.totalKnown?.let { "${s.ownedTomes}/$it tomes" } ?: "${s.ownedTomes} tome(s)"
-                Tag(count, cs.surfaceVariant, cs.onSurfaceVariant)
-                if (s.missingCount > 0) Tag("${s.missingCount} manquant(s)", cs.tertiaryContainer, cs.onTertiaryContainer)
+                val owned = if (s.isOneshot) null else s.totalKnown?.let { "${s.ownedTomes}/$it" } ?: "${s.ownedTomes}"
+                IconTag(if (s.isOneshot) Icons.Outlined.Book else Icons.Outlined.CollectionsBookmark, count, cs.onSurfaceVariant, owned)
+                if (s.missingCount > 0) IconTag(Icons.Outlined.ReportProblem, "${s.missingCount} manquant(s)", cs.tertiary, "${s.missingCount}")
             }
         }
     }

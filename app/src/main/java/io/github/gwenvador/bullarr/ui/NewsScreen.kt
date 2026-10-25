@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.DownloadDone
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CollectionsBookmark
@@ -22,8 +25,8 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
@@ -42,6 +45,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import io.github.gwenvador.bullarr.data.str
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -97,18 +103,57 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     }
     LaunchedEffect(api) { if (feeds.isEmpty()) loadAll(refresh = false) }
 
-    val shownTypes = if (tab == 0) NewsType.entries else listOf(NewsType.entries[tab - 1])
-    val items = remember(tab, feeds.toMap()) {
-        shownTypes.flatMap { feeds[it].orEmpty() }.let { list ->
-            if (tab == 0) list.sortedByDescending { it.date ?: "" } else list
+    // Genre (BD / Comics / Manga) d'après l'origine de la fiche Bédéthèque, comme la page web :
+    // POST /api/bedetheque/origins, par lots de 100, en redemandant tant que le serveur lit des pages.
+    val genres = remember { mutableStateMapOf<String, String?>() }
+    var genreFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val wantedUrls = remember(feeds.toMap()) { feeds.values.flatten().mapNotNull { it.bedethequeUrl }.distinct() }
+    LaunchedEffect(wantedUrls) {
+        var missing = wantedUrls.filter { it !in genres }
+        var rounds = 0
+        while (missing.isNotEmpty() && rounds++ < 40) {
+            val batch = missing.take(100)
+            val o = runCatching {
+                api.postObject("api/bedetheque/origins", org.json.JSONObject().put("urls", org.json.JSONArray(batch)))
+            }.getOrNull() ?: break
+            val answered = o.optJSONObject("origins")
+            answered?.keys()?.forEach { url -> genres[url] = answered.optJSONObject(url)?.str("kind") }
+            if ((answered == null || answered.length() == 0) && o.optInt("pending") == 0) batch.forEach { genres[it] = null }
+            missing = wantedUrls.filter { it !in genres }
+            if (missing.isNotEmpty()) kotlinx.coroutines.delay(300)
         }
+    }
+
+    val shownTypes = if (tab == 0) NewsType.entries else listOf(NewsType.entries[tab - 1])
+    val items = remember(tab, feeds.toMap(), genreFilter, genres.toMap()) {
+        shownTypes.flatMap { feeds[it].orEmpty() }
+            .filter { genreFilter == null || it.bedethequeUrl?.let { u -> genres[u] } == genreFilter }
+            .let { list -> if (tab == 0) list.sortedByDescending { it.date ?: "" } else list }
     }
 
     Column(Modifier.fillMaxSize()) {
         PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
             TABS.forEachIndexed { i, t ->
                 val count = if (i == 0) NewsType.entries.sumOf { feeds[it]?.size ?: 0 } else feeds[NewsType.entries[i - 1]]?.size
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(if (count != null && count > 0) "$t ($count)" else t) })
+                Tab(selected = tab == i, onClick = { tab = i }, text = {
+                    // Logo de la source (Tout garde son mot), suivi du nombre d'entrées.
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (i == 0) Text(t) else Logo(NewsType.entries[i - 1].name.lowercase(), t, 22.dp, tip = false)
+                        if (count != null && count > 0) Text("$count")
+                    }
+                })
+            }
+        }
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(null to "Tous", "bd" to "BD", "comics" to "Comics", "manga" to "Manga").forEach { (k, l) ->
+                // Drapeau du genre (BD = France, Comics = USA, Manga = Japon), nombre d'entrées à côté.
+                val n = if (k == null) null else feeds.values.flatten().count { it.bedethequeUrl?.let { u -> genres[u] } == k }
+                FilterChip(selected = genreFilter == k, onClick = { genreFilter = k }, label = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (k == null) Text(l) else Logo(k, l, 20.dp, tip = false)
+                        if (n != null && n > 0) Text("$n")
+                    }
+                })
             }
         }
         if (loading && feeds.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -126,7 +171,7 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                     item { EmptyState("Rien de neuf", "Aucune entrée récente.") }
                 }
                 itemsIndexed(items, key = { i, it -> "${it.type}-$i-${it.title.hashCode()}" }) { _, item ->
-                    NewsRow(vm, item, showType = tab == 0, onOpenSeries = onOpenSeries)
+                    NewsRow(vm, item, showType = tab == 0, genre = item.bedethequeUrl?.let { genres[it] }, onOpenSeries = onOpenSeries)
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
@@ -135,7 +180,7 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
 }
 
 @Composable
-private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, onOpenSeries: (Int, String) -> Unit) {
+private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onOpenSeries: (Int, String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val uri = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
@@ -155,20 +200,36 @@ private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, onOpenS
             item.subtitle?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             Text(item.title, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis,
                 color = if (item.subtitle != null) cs.onSurfaceVariant else cs.onSurface)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (showType) Tag(item.type.label, cs.surfaceVariant, cs.onSurfaceVariant)
-                if (item.owned) Tag("Possédé", cs.secondaryContainer, cs.onSecondaryContainer)
-                else if (item.inLibrary) Tag("Série en bibliothèque", cs.primaryContainer, cs.onPrimaryContainer)
-                if (item.downloaded) Tag("Téléchargé", cs.tertiaryContainer, cs.onTertiaryContainer)
-                if (sentTo != null) Tag("Envoyé à $sentTo", cs.secondaryContainer, cs.onSecondaryContainer)
+            // FlowRow : les pastilles passent à la ligne au lieu de s'écraser.
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Icônes plutôt que texte ; le libellé apparaît au long appui.
+                if (showType) Logo(item.type.name.lowercase(), item.type.label, 20.dp)
+                when (genre) {
+                    "bd" -> Logo("bd", "BD", 20.dp)
+                    "comics" -> Logo("comics", "Comics", 20.dp)
+                    "manga" -> Logo("manga", "Manga", 20.dp)
+                }
+                if (item.owned) StatusIcon(Icons.Outlined.CheckCircle, "Possédé", cs.primary, 20.dp)
+                else if (item.inLibrary) StatusIcon(Icons.Outlined.CollectionsBookmark, "Série en bibliothèque", cs.secondary, 20.dp)
+                if (item.downloaded) StatusIcon(Icons.Outlined.DownloadDone, "Téléchargé", cs.tertiary, 20.dp)
+                if (sentTo != null) {
+                    val k = logoKey(sentTo)
+                    if (hasLogo(k)) Logo(k, "Envoyé à $sentTo", 20.dp)
+                    else StatusIcon(Icons.AutoMirrored.Outlined.Send, "Envoyé à $sentTo", cs.secondary, 20.dp)
+                }
                 item.bedethequeUrl?.let { bd ->
-                    androidx.compose.foundation.layout.Box(Modifier.clickable { runCatching { uri.openUri(bd) } }) {
-                        Tag("Bédéthèque ↗", cs.tertiaryContainer, cs.onTertiaryContainer)
-                    }
+                    Logo("bedetheque", "Ouvrir sur Bédéthèque", 22.dp, Modifier.clickable { runCatching { uri.openUri(bd) } })
                 }
             }
-            val meta = listOfNotNull(item.source, item.date, formatBytes(item.sizeBytes)).joinToString(" · ")
-            if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            val meta = listOfNotNull(item.source?.replace("Prowlarr · ", "")?.replace("Prowlarr — ", ""), item.date, formatBytes(item.sizeBytes)).joinToString(" · ")
+            if (meta.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                logoKey(item.source)?.takeIf { it != item.type.name.lowercase() || !showType }?.let { Logo(it, item.source ?: "", 14.dp) }
+                Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
         }
         if (item.files.isNotEmpty()) {
             IconButton(onClick = {

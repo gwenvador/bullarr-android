@@ -1,5 +1,9 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.LibraryAddCheck
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -24,10 +28,10 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.FilterChip
+import io.github.gwenvador.bullarr.ui.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import io.github.gwenvador.bullarr.ui.Icon
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -68,6 +72,17 @@ private val ENRICH_TABS = listOf("Indispensables BD", "Panthéon", "Thèmes", "T
 private val CATEGORIES = listOf("all" to "Tous", "franco-belge" to "Franco-belge", "comics" to "Comics", "manga" to "Manga")
 private val PANTHEON_CATEGORIES = CATEGORIES + ("fondateurs" to "Fondateurs")
 private val BDGEST_ORIGINS = listOf("general" to "Général", "franco-belge" to "Franco-belge", "manga" to "Manga", "comics" to "Comics")
+
+/** Drapeau pour Franco-belge (France), Comics (États-Unis) et Manga (Japon) ; icônes pour Tous/Général et Fondateurs. */
+@Composable
+private fun OriginLabel(key: String, label: String) {
+    val flag = when (key) { "franco-belge" -> "bd"; "manga" -> "manga"; "comics" -> "comics"; else -> null }
+    when {
+        flag != null -> Logo(flag, label, 24.dp, tip = false)
+        key == "fondateurs" -> Icon(Icons.Outlined.EmojiEvents, contentDescription = label, modifier = Modifier.size(22.dp))
+        else -> Icon(Icons.Outlined.Public, contentDescription = label, modifier = Modifier.size(22.dp))
+    }
+}
 
 /** Série affichée dans une liste d'Enrichir, quel que soit l'onglet d'origine. */
 private data class Discovery(
@@ -191,10 +206,10 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
                 Text(author?.name ?: theme!!.second, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
             tab == 0 -> FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CATEGORIES.forEach { (k, l) -> FilterChip(selected = category == k, onClick = { category = k }, label = { Text(l) }) }
+                CATEGORIES.forEach { (k, l) -> FilterChip(selected = category == k, onClick = { category = k }, label = { OriginLabel(k, l) }) }
             }
             tab == 1 -> FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PANTHEON_CATEGORIES.forEach { (k, l) -> FilterChip(selected = pantheonCategory == k, onClick = { pantheonCategory = k }, label = { Text(l) }) }
+                PANTHEON_CATEGORIES.forEach { (k, l) -> FilterChip(selected = pantheonCategory == k, onClick = { pantheonCategory = k }, label = { OriginLabel(k, l) }) }
             }
             tab == 3 -> Column(Modifier.padding(horizontal = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -203,7 +218,9 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
                     IconButton(onClick = { bdgestYear++ }, enabled = bdgestYear < java.time.Year.now().value) { Icon(Icons.Outlined.ChevronRight, contentDescription = "Année suivante") }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BDGEST_ORIGINS.forEach { (k, l) -> FilterChip(selected = bdgestOrigin == k, onClick = { bdgestOrigin = k }, label = { Text(l) }) }
+                    BDGEST_ORIGINS.forEach { (k, l) ->
+                        FilterChip(selected = bdgestOrigin == k, onClick = { bdgestOrigin = k }, label = { OriginLabel(k, l) })
+                    }
                 }
             }
             tab == 4 -> {
@@ -244,7 +261,7 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
                                     Text(a.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                     a.meta?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                                 }
-                                if (a.owned) Tag("En bibliothèque", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+                                if (a.owned) IconTag(Icons.Outlined.LibraryAddCheck, "En bibliothèque", MaterialTheme.colorScheme.secondary)
                                 Icon(Icons.Outlined.ChevronRight, contentDescription = "Voir ses séries", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -285,7 +302,7 @@ private fun DiscoveryRow(d: Discovery, inLibrary: Boolean, busy: Boolean, onOpen
             d.summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
         when {
-            inLibrary -> Tag("En bibliothèque", cs.secondaryContainer, cs.onSecondaryContainer)
+            inLibrary -> IconTag(Icons.Outlined.LibraryAddCheck, "En bibliothèque", cs.secondary)
             d.url != null -> IconButton(onClick = onAdd, enabled = !busy) { Icon(Icons.Outlined.Add, contentDescription = "Ajouter à la bibliothèque") }
         }
     }

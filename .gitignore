@@ -13,3 +13,4 @@ captures/
 # APK : publiés dans les releases, pas dans le dépôt
 *.apk
 *.aab
+dist/

@@ -23,7 +23,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
+import io.github.gwenvador.bullarr.ui.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -202,7 +202,7 @@ fun ClearableField(
             {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (value.isNotEmpty()) {
-                        androidx.compose.material3.IconButton(onClick = { onValueChange("") }) {
+                        IconButton(onClick = { onValueChange("") }) {
                             Icon(androidx.compose.material.icons.Icons.Outlined.Clear, contentDescription = "Effacer")
                         }
                     }

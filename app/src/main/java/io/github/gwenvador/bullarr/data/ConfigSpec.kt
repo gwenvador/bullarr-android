@@ -84,6 +84,19 @@ val CLIENTS = listOf(
 
 val INDEXERS = listOf(
     Integration(
+        "ebdz", "EBDZ — compte", "api/ebdz/config",
+        listOf(FText("username", "Identifiant"), FSecret("password", "Mot de passe")),
+        help = "Les forums à indexer restent tels quels (ils se règlent dans l'interface web).",
+    ),
+    Integration(
+        "ebdz_auto", "EBDZ — scraping automatique", "api/ebdz/auto-scrape/config",
+        listOf(
+            FSwitch("auto_scrape_enabled", "Scraper automatiquement"),
+            FNumber("auto_scrape_interval", "Intervalle"),
+            FChoice("auto_scrape_interval_unit", "Unité", listOf("minutes" to "Minutes", "hours" to "Heures", "days" to "Jours")),
+        ),
+    ),
+    Integration(
         "prowlarr", "Prowlarr", "api/prowlarr/config",
         listOf(ENABLED, FText("url", "URL", "https://prowlarr.exemple.fr", url = true), FNumber("port", "Port"), FSecret("api_key", "Clé API")),
         TestCall(false, "api/prowlarr/test"),
@@ -120,6 +133,15 @@ val NOTIFICATIONS = listOf(
 private const val IMPORT = "api/import/config"
 
 val IMPORTS = listOf(
+    Integration(
+        "rename", "Format de renommage", "api/settings/rename",
+        listOf(
+            FText("volume_template", "Modèle d'un tome"),
+            FText("oneshot_template", "Modèle d'un one-shot"),
+            FText("series_template", "Modèle du dossier de série"),
+        ),
+        help = "Laissez vide pour revenir au format par défaut. Les variables disponibles sont décrites dans l'interface web.",
+    ),
     Integration(
         "import", "Import automatique", IMPORT,
         listOf(
@@ -235,3 +257,21 @@ fun buildPayload(spec: Integration, fresh: JSONObject, initial: Map<String, Any>
     }
     return body
 }
+
+/** Accès à Bullarr (mot de passe, SSO). La clé API reste valable quel que soit le mode. */
+val ACCESS = listOf(
+    Integration(
+        "login", "Connexion à Bullarr", "api/auth/config",
+        listOf(
+            FChoice("mode", "Authentification", listOf("none" to "Aucune", "password" to "Mot de passe", "oidc" to "SSO (OIDC)", "both" to "Mot de passe + SSO")),
+            FText("username", "Identifiant"),
+            FSecret("password", "Nouveau mot de passe"),
+            FText("issuer", "URL de l'issuer SSO", "https://sso.exemple.fr", url = true),
+            FText("client_id", "Client ID"),
+            FSecret("client_secret", "Client secret"),
+            FText("scopes", "Scopes", "openid profile email"),
+            FSwitch("auto_redirect", "Aller directement au SSO", "Saute le formulaire de connexion de la page web."),
+        ),
+        help = "Attention : avec « Aucune », tout le monde accède à Bullarr. L'app continue de fonctionner avec la clé API quel que soit le mode.",
+    ),
+)

@@ -11,11 +11,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Sync
+import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material.icons.outlined.VerticalAlignTop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
+import io.github.gwenvador.bullarr.ui.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -84,6 +89,28 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     }
     Polling(4000, api) { refresh() }
 
+    var toDelete by remember { mutableStateOf<Pair<String, suspend () -> Unit>?>(null) }
+    toDelete?.let { (label, run) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { toDelete = null },
+            title = { Text("Supprimer ce téléchargement ?") },
+            text = { Text("$label\n\nIl est annulé chez le client et retiré de la file de Bullarr.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    toDelete = null
+                    scope.launch {
+                        try { run(); snackbar.showSnackbar("Téléchargement supprimé"); refresh() }
+                        catch (e: Exception) { snackbar.showSnackbar(e.readable()) }
+                    }
+                }) { Text("Supprimer") }
+            },
+            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annuler") } },
+        )
+    }
+    // Ligne suivie par Bullarr : /pending/remove (annule aussi chez le client) ; sinon suppression directe chez le client.
+    val removeUrls = mapOf("qbittorrent" to "api/qbittorrent/remove", "rtorrent" to "api/rtorrent/remove",
+        "deluge" to "api/deluge/remove", "amule" to "api/emule/remove")
+
     fun control(trackingId: Int, action: String) {
         busy = trackingId
         scope.launch {
@@ -131,6 +158,14 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         controllable = item.trackingId != null && c.client in CONTROLLABLE,
                         busy = busy == item.trackingId,
                         onAction = { a -> item.trackingId?.let { control(it, a) } },
+                        onDelete = if (item.trackingId != null || (item.clientId != null && c.client in removeUrls)) ({
+                            toDelete = (item.name) to suspend {
+                                val tid = item.trackingId
+                                if (tid != null) api.postObject("api/activity/pending/remove", JSONObject().put("id", tid))
+                                else api.postObject(removeUrls.getValue(c.client), JSONObject().put("id", item.clientId))
+                                Unit
+                            }
+                        }) else null,
                     )
                 }
                 item { SectionTitle("En attente d'import ou de téléchargement", st.pending.size) }
@@ -142,6 +177,9 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                             (p.client == "telegram" || p.clientItemId != null),
                         busy = busy == p.id,
                         onAction = { a -> control(p.id, a) },
+                        onDelete = {
+                            toDelete = p.title to suspend { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit }
+                        },
                     )
                 }
             }
@@ -163,7 +201,7 @@ private fun isPausedState(state: String?): Boolean {
 }
 
 @Composable
-private fun DownloadCard(item: DownloadItem, clientLabel: String, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit) {
+private fun DownloadCard(item: DownloadItem, clientLabel: String, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit, onDelete: (() -> Unit)?) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -179,18 +217,21 @@ private fun DownloadCard(item: DownloadItem, clientLabel: String, controllable: 
                 item.speed?.takeIf { it > 0 }?.let { "${formatBytes(it)}/s" },
                 formatDuration(item.eta)?.let { "reste $it" },
                 item.state,
-                clientLabel,
             )
-            Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
-            if (controllable) {
-                Controls(paused = isPausedState(item.state), busy = busy, onAction = onAction)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Logo(logoKey(clientLabel), clientLabel, 20.dp)
+                if (!hasLogo(logoKey(clientLabel))) Text(clientLabel, style = MaterialTheme.typography.bodySmall)
+                Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            }
+            if (controllable || onDelete != null) {
+                Controls(paused = isPausedState(item.state), busy = busy, onAction = onAction, controllable = controllable, onDelete = onDelete)
             }
         }
     }
 }
 
 @Composable
-private fun PendingCard(p: PendingDownload, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit) {
+private fun PendingCard(p: PendingDownload, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit, onDelete: (() -> Unit)?) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -198,8 +239,8 @@ private fun PendingCard(p: PendingDownload, controllable: Boolean, busy: Boolean
                     listOfNotNull(p.seriesTitle, p.volume.ifBlank { null }).joinToString(" · ").ifBlank { p.title },
                     style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 )
-                val (label, tone) = statusLabel(p)
-                Tag(label, tone.first, tone.second)
+                val (label, icon, tint) = statusLabel(p)
+                StatusIcon(icon, label, tint, 22.dp)
             }
             Text(p.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -209,33 +250,39 @@ private fun PendingCard(p: PendingDownload, controllable: Boolean, busy: Boolean
                 LinearProgressIndicator(progress = { done.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
             }
             val parts = listOfNotNull(
-                p.client,
                 if (total != null && total > 0) "${formatBytes(p.bytesDownloaded) ?: "0"} / ${formatBytes(total)}" else null,
                 if (p.isPack) "pack" else null,
                 when (p.localCopy) { "present" -> "fichiers arrivés"; "settling" -> "copie en cours"; "absent" -> "fichiers pas encore là"; else -> null },
                 if (p.exhausted) "tentatives épuisées" else null,
                 p.createdAt?.take(16),
             )
-            Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
-            if (controllable) Controls(paused = p.paused, busy = busy, onAction = onAction)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                p.client?.let { c ->
+                    Logo(logoKey(c), c, 20.dp)
+                    if (!hasLogo(logoKey(c))) Text(c, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            }
+            Controls(paused = p.paused, busy = busy, onAction = onAction, controllable = controllable, onDelete = onDelete)
         }
     }
 }
 
 @Composable
-private fun statusLabel(p: PendingDownload): Pair<String, Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color>> {
+private fun statusLabel(p: PendingDownload): Triple<String, ImageVector, androidx.compose.ui.graphics.Color> {
     val cs = MaterialTheme.colorScheme
     return when {
-        p.paused -> "En pause" to (cs.tertiaryContainer to cs.onTertiaryContainer)
-        p.status == "completed" -> "Prêt à importer" to (cs.secondaryContainer to cs.onSecondaryContainer)
-        p.status == "importing" -> "Import…" to (cs.primaryContainer to cs.onPrimaryContainer)
-        else -> "En attente" to (cs.surfaceVariant to cs.onSurfaceVariant)
+        p.paused -> Triple("En pause", Icons.Outlined.Pause, cs.tertiary)
+        p.status == "completed" -> Triple("Prêt à importer", Icons.Outlined.CheckCircle, cs.secondary)
+        p.status == "importing" -> Triple("Import en cours", Icons.Outlined.Sync, cs.primary)
+        else -> Triple("En attente", Icons.Outlined.Schedule, cs.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun Controls(paused: Boolean, busy: Boolean, onAction: (String) -> Unit) {
+private fun Controls(paused: Boolean, busy: Boolean, onAction: (String) -> Unit, controllable: Boolean, onDelete: (() -> Unit)?) {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (controllable) {
         if (paused) ActionButton("Reprendre", Icons.Outlined.PlayArrow, busy) { onAction("resume") }
         else ActionButton("Pause", Icons.Outlined.Pause, busy) { onAction("pause") }
         ActionButton("En premier", Icons.Outlined.VerticalAlignTop, busy) { onAction("top") }
@@ -243,13 +290,14 @@ private fun Controls(paused: Boolean, busy: Boolean, onAction: (String) -> Unit)
             // L'état exact n'est pas toujours connu (aMule, Telegram) : la reprise reste accessible.
             ActionButton("Reprendre", Icons.Outlined.PlayArrow, busy) { onAction("resume") }
         }
+        }
+        if (onDelete != null) IconButton(onClick = onDelete, enabled = !busy) {
+            Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
 @Composable
 private fun ActionButton(label: String, icon: ImageVector, busy: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick, enabled = !busy) {
-        Icon(icon, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
-        Text(label)
-    }
+    IconButton(onClick = onClick, enabled = !busy) { Icon(icon, contentDescription = label) }
 }
