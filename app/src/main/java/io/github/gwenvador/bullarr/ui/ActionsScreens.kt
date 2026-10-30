@@ -111,7 +111,6 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     val api = vm.api ?: return
     var rows by remember { mutableStateOf<List<Row3>?>(null) }
     val errors = remember { mutableStateMapOf<String, String>() }
-    var filter by rememberSaveable { mutableStateOf("Tout") }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -167,28 +166,16 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     }
     LaunchedEffect(api) { if (rows == null) load() }
 
-    val filters = listOf("Tout", "Import", "Téléchargement", "Actions")
-    val shown = rows.orEmpty().filter {
-        when (filter) {
-            "Tout" -> true
-            "Actions" -> it.kind != "Import" && it.kind != "Téléchargement"
-            else -> it.kind == filter
-        }
-    }
+    var kind by rememberSaveable { mutableStateOf<String?>(null) }
+    val kinds = rows.orEmpty().groupingBy { it.kind }.eachCount().entries.sortedByDescending { it.value }
+    val shown = rows.orEmpty().filter { kind == null || it.kind == kind }
     PullToRefreshBox(isRefreshing = loading && rows != null, onRefresh = { scope.launch { load() } }, modifier = Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-            item {
-                // Une seule ligne, icônes seules (libellé lu par TalkBack).
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    filters.forEach { f ->
-                        val ic = when (f) {
-                            "Import" -> Icons.Outlined.MoveToInbox
-                            "Téléchargement" -> Icons.Outlined.Download
-                            "Actions" -> Icons.Outlined.Bolt
-                            else -> Icons.Outlined.Apps
-                        }
-                        FilterChip(selected = filter == f, onClick = { filter = f }, modifier = Modifier.weight(1f),
-                            label = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Icon(ic, contentDescription = f, modifier = Modifier.size(20.dp)) } })
+            // Types d'événements présents, une seule ligne défilante.
+            if (kinds.size > 1) item {
+                androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(kinds, key = { it.key }) { (k, n) ->
+                        FilterChip(selected = kind == k, onClick = { kind = if (kind == k) null else k }, label = { Text("$k · $n", maxLines = 1) })
                     }
                 }
             }

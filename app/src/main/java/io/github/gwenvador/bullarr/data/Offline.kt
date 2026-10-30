@@ -68,11 +68,31 @@ class OfflineStore(context: Context) {
 
     fun delete(id: Int) { dir(id).deleteRecursively() }
 
+    /**
+     * Rattache à leur identifiant actuel les copies dont le tome a changé d'id côté Bullarr (série rescannée,
+     * fichier réimporté) : même série, même libellé, ancien id absent de la série. Renvoie le nombre de copies rattachées.
+     */
+    fun adopt(seriesId: Int, current: List<Pair<Int, String>>): Int {
+        val ids = current.map { it.first }.toSet()
+        val orphans = list().filter { it.meta.seriesId == seriesId && it.meta.volumeId !in ids }.toMutableList()
+        var n = 0
+        for ((id, label) in current) {
+            if (metaOf(id) != null) continue
+            val match = orphans.firstOrNull { it.meta.label == label } ?: continue
+            val from = dir(match.meta.volumeId)
+            val to = dir(id)
+            if (to.exists() || !from.renameTo(to)) continue
+            saveMeta(match.meta.copy(volumeId = id))
+            orphans.remove(match); n++
+        }
+        return n
+    }
+
     /** Espace libre sur l'appareil, pour prévenir avant un gros téléchargement. */
     fun freeBytes(): Long = root.usableSpace
 }
 
-data class OfflineProgress(val done: Int, val total: Int, val error: String? = null)
+data class OfflineProgress(val done: Int, val total: Int, val error: String? = null, val paused: Boolean = false)
 
 /** Téléchargements en cours (tant que l'app est ouverte ; un téléchargement interrompu reprend où il s'est arrêté). */
 class OfflineManager(
@@ -85,13 +105,29 @@ class OfflineManager(
     /** Incrémenté à chaque changement du contenu du disque : les listes se rafraîchissent. */
     var version by mutableIntStateOf(0); private set
     private val jobs = HashMap<Int, Job>()
+    private val pausing = HashSet<Int>()
     private val gate = Semaphore(3)
+
+    /** Albums hors ligne par série (id de série, sinon titre pour les copies anciennes sans id). */
+    fun downloadedBySeries(): Pair<Map<Int, Int>, Map<String, Int>> {
+        version
+        val items = store.list()
+        return items.mapNotNull { it.meta.seriesId }.groupingBy { it }.eachCount() to
+            items.filter { it.meta.seriesId == null }.mapNotNull { it.meta.seriesTitle }.groupingBy { it }.eachCount()
+    }
+
+    fun adopt(seriesId: Int, current: List<Pair<Int, String>>) {
+        scope.launch(Dispatchers.IO) {
+            if (store.adopt(seriesId, current) > 0) withContext(Dispatchers.Main) { version++ }
+        }
+    }
 
     fun isDownloaded(id: Int): Boolean { version; return store.metaOf(id) != null }
 
     fun start(volumeId: Int, title: String) {
         val client = api() ?: return
         if (jobs[volumeId]?.isActive == true) return
+        pausing.remove(volumeId)
         titles[volumeId] = title
         active[volumeId] = OfflineProgress(store.pagesOnDisk(volumeId), 0)
         jobs[volumeId] = scope.launch(Dispatchers.IO) {
@@ -115,7 +151,11 @@ class OfflineManager(
                 store.saveMeta(meta)
                 withContext(Dispatchers.Main) { active.remove(volumeId); version++ }
             } catch (e: CancellationException) {
-                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { active.remove(volumeId) }
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
+                    // Pause : l'entrée reste, avec les pages déjà reçues ; sinon l'arrêt la retire.
+                    if (volumeId in pausing) active[volumeId] = OfflineProgress(active[volumeId]?.done ?: 0, active[volumeId]?.total ?: 0, paused = true)
+                    else active.remove(volumeId)
+                }
                 throw e
             } catch (e: Exception) {
                 val p = active[volumeId]
@@ -124,8 +164,19 @@ class OfflineManager(
         }
     }
 
+    /** Met en pause : les pages reçues sont gardées, [start] reprend où le téléchargement s'était arrêté. */
+    fun pause(volumeId: Int) {
+        val p = active[volumeId] ?: return
+        if (p.error != null || p.paused) return
+        pausing += volumeId
+        active[volumeId] = p.copy(paused = true)
+        jobs.remove(volumeId)?.cancel()
+    }
+
+    fun resume(volumeId: Int) { if (active[volumeId]?.paused == true) start(volumeId, titles[volumeId] ?: "Album $volumeId") }
+
     /** Arrête le téléchargement ; les pages déjà reçues sont gardées pour reprendre. */
-    fun cancel(volumeId: Int) { jobs.remove(volumeId)?.cancel(); active.remove(volumeId) }
+    fun cancel(volumeId: Int) { pausing.remove(volumeId); jobs.remove(volumeId)?.cancel(); active.remove(volumeId) }
 
     fun delete(volumeId: Int) {
         cancel(volumeId)

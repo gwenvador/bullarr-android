@@ -3,7 +3,17 @@ package io.github.gwenvador.bullarr.ui
 import androidx.compose.material.icons.outlined.ReportProblem
 import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Book
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -62,10 +72,34 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
         vm.sort.sorted(vm.series.filter { s -> (terms.isEmpty() || terms.all { it in s.searchKey }) && filters.matches(s) }, vm.sortDesc)
     }
     var sortMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
+    // Sélection multiple (appui long sur une série) : MAJ Bédéthèque, scan, suppression.
+    var selected by rememberSaveable { androidx.compose.runtime.mutableStateOf(emptyList<Int>()) }
+    var addSeries by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var confirmDelete by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var confirmDownload by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val offlineBySeries = remember(vm.offline.version) { vm.offline.downloadedBySeries() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptyList() }
+    fun toggle(id: Int) { selected = if (id in selected) selected - id else selected + id }
+    fun batch(ok: String, reload: Boolean, one: suspend (io.github.gwenvador.bullarr.data.BullarrApi, Int) -> Unit) {
+        val api = vm.api ?: return
+        val ids = selected
+        selected = emptyList()
+        launchAction(scope, context, "$ok (${ids.size})", then = { if (reload) vm.loadLibrary(force = true) }) { ids.forEach { one(api, it) } }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (selected.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { selected = emptyList() }) { Icon(Icons.Outlined.Clear, contentDescription = "Annuler la sélection") }
+                Text("${selected.size}", style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f))
+                IconButton(onClick = { selected = filtered.map { it.id } }) { Icon(Icons.Outlined.SelectAll, contentDescription = "Tout sélectionner") }
+                IconButton(onClick = { confirmDownload = true }) { Icon(Icons.Outlined.DownloadForOffline, contentDescription = "Télécharger hors ligne") }
+                IconButton(onClick = { batch("Mise à jour lancée", false) { a, id -> ItemActions.updateSeriesMetadata(a, id) } }) { Icon(Icons.Outlined.Sync, contentDescription = "Mettre à jour les métadonnées (Bédéthèque)") }
+                IconButton(onClick = { batch("Scan lancé", true) { a, id -> ItemActions.scanSeries(a, id) } }) { Icon(Icons.Outlined.Refresh, contentDescription = "Scanner les fichiers") }
+                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error) }
+            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 CompactSearchField(
                     value = q, onValueChange = { vm.query = it },
                     placeholder = "Rechercher une série, un auteur…",
@@ -95,6 +129,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                         }
                     }
                 }
+                IconButton(onClick = { addSeries = true }) { Icon(Icons.Outlined.Add, contentDescription = "Ajouter une série") }
                 // Bouton de filtres, avec le nombre de groupes actifs.
                 androidx.compose.material3.BadgedBox(badge = {
                     if (filters.activeCount > 0) androidx.compose.material3.Badge { Text("${filters.activeCount}") }
@@ -118,6 +153,31 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 )
             }
         }
+        if (addSeries) SeriesAddDialog(vm, onDismiss = { addSeries = false }, onAdded = { _, _ -> })
+        if (confirmDownload) ConfirmDialog(
+            "Télécharger ${selected.size} série(s) hors ligne ?",
+            "Tous les tomes possédés des séries sélectionnées seront téléchargés sur le téléphone. Cela peut être volumineux.",
+            "Télécharger", onConfirm = {
+                val api = vm.api
+                val picked = filtered.filter { it.id in selected }
+                selected = emptyList()
+                if (api != null) launchAction(scope, context, "Téléchargements lancés") {
+                    var n = 0
+                    picked.forEach { sm ->
+                        val d = io.github.gwenvador.bullarr.data.parseSeriesDetail(api.getObject("api/series/${sm.id}"))
+                        d.volumes.filter { it.owned && !vm.offline.isDownloaded(it.id) && !vm.offline.active.containsKey(it.id) }.forEach {
+                            vm.offline.start(it.id, "${d.title} · ${it.label}"); n++
+                        }
+                    }
+                    if (n == 0) throw io.github.gwenvador.bullarr.data.ApiException("Rien à télécharger : tout est déjà hors ligne.")
+                }
+            }, onDismiss = { confirmDownload = false },
+        )
+        if (confirmDelete) ConfirmDialog(
+            "Supprimer ${selected.size} série(s) ?",
+            "Les dossiers et fichiers des séries sélectionnées seront supprimés du disque. Cette action est irréversible.",
+            "Supprimer", onConfirm = { batch("Séries supprimées", true) { a, id -> ItemActions.deleteSeries(a, id) } }, onDismiss = { confirmDelete = false },
+        )
         if (sheet) LibraryFilterSheet(vm.series, filters, filtered.size, onChange = { vm.filters = it }, onDismiss = { sheet = false })
         if (vm.libraryLoading && vm.series.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
 
@@ -146,7 +206,11 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     }
                 }
                 items(filtered, key = { it.id }) { s ->
-                    SeriesRow(s, vm.coverUrl(s.coverPath)) { onOpen(s) }
+                    SeriesRow(
+                        s, vm.coverUrl(s.coverPath), selected = s.id in selected,
+                        offline = (offlineBySeries.first[s.id] ?: 0) + (offlineBySeries.second[s.title] ?: 0),
+                        onLongClick = { toggle(s.id) },
+                    ) { if (selected.isNotEmpty()) toggle(s.id) else onOpen(s) }
                     HorizontalDivider(Modifier.padding(start = 84.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
@@ -155,9 +219,13 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
 }
 
 @Composable
-private fun SeriesRow(s: SeriesSummary, cover: String?, onClick: () -> Unit) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun SeriesRow(s: SeriesSummary, cover: String?, selected: Boolean, offline: Int, onLongClick: () -> Unit, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Cover(cover, 52.dp)
@@ -172,8 +240,10 @@ private fun SeriesRow(s: SeriesSummary, cover: String?, onClick: () -> Unit) {
                 val count = if (s.isOneshot) "One-shot" else s.totalKnown?.let { "${s.ownedTomes}/$it tomes" } ?: "${s.ownedTomes} tome(s)"
                 val owned = if (s.isOneshot) null else s.totalKnown?.let { "${s.ownedTomes}/$it" } ?: "${s.ownedTomes}"
                 IconTag(if (s.isOneshot) Icons.Outlined.Book else Icons.Outlined.CollectionsBookmark, count, cs.onSurfaceVariant, owned)
+                if (offline > 0) IconTag(Icons.Outlined.OfflinePin, "$offline album(s) hors ligne", cs.primary, "$offline")
                 if (s.missingCount > 0) IconTag(Icons.Outlined.ReportProblem, "${s.missingCount} manquant(s)", cs.tertiary, "${s.missingCount}")
             }
         }
+        if (selected) Icon(Icons.Outlined.CheckCircle, contentDescription = "Sélectionnée", tint = MaterialTheme.colorScheme.primary)
     }
 }

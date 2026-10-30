@@ -1,5 +1,12 @@
 package io.github.gwenvador.bullarr
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.automirrored.outlined.Login
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -10,6 +17,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import io.github.gwenvador.bullarr.ui.Icon
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.PrimaryScrollableTabRow
@@ -41,7 +51,6 @@ import io.github.gwenvador.bullarr.ui.BullarrTheme
 import io.github.gwenvador.bullarr.ui.DownloadDialogs
 import io.github.gwenvador.bullarr.ui.EnrichScreen
 import io.github.gwenvador.bullarr.ui.HistoryScreen
-import io.github.gwenvador.bullarr.ui.ImportScreen
 import io.github.gwenvador.bullarr.ui.LibraryScreen
 import io.github.gwenvador.bullarr.ui.LoginScreen
 import io.github.gwenvador.bullarr.ui.MonitorScreen
@@ -62,6 +71,23 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         setContent { BullarrTheme { BullarrApp() } }
+        handleAuthIntent(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleAuthIntent(intent)
+    }
+
+    /** Retour du SSO par navigateur : bullarr://auth?code=… */
+    private fun handleAuthIntent(intent: android.content.Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "bullarr" || data.host != "auth") return
+        val vm = androidx.lifecycle.ViewModelProvider(this)[io.github.gwenvador.bullarr.ui.AppViewModel::class.java]
+        val code = data.getQueryParameter("code")
+        if (code.isNullOrBlank()) vm.ssoError = data.getQueryParameter("error") ?: "Le serveur n'a renvoyé aucun code de connexion."
+        else vm.completeSso(code)
+        intent.data = null
     }
 }
 
@@ -71,8 +97,22 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
     SideEffect { vm.downloads.snackbar = snackbar }
 
     if (vm.api == null) {
-        Scaffold { pad ->
-            Box(Modifier.padding(pad)) { LoginScreen(vm, firstRun = true, onSaved = { vm.section = Section.Library }) }
+        // Non connecté : seulement la connexion et les albums déjà copiés sur le téléphone.
+        var tab by rememberSaveable { mutableIntStateOf(0) }
+        Box(Modifier.fillMaxSize()) {
+            Scaffold(
+                bottomBar = {
+                    NavigationBar {
+                        NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Icon(Icons.AutoMirrored.Outlined.Login, contentDescription = null) }, label = { Text("Connexion", fontSize = 11.sp) })
+                        NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, icon = { Icon(Icons.Outlined.DownloadForOffline, contentDescription = null) }, label = { Text("Hors ligne", fontSize = 11.sp) })
+                    }
+                },
+            ) { pad ->
+                Box(Modifier.fillMaxSize().padding(pad)) {
+                    if (tab == 0) LoginScreen(vm, firstRun = true, onSaved = { vm.section = Section.Library }) else OfflineScreen(vm)
+                }
+            }
+            vm.reading?.let { target -> ReaderScreen(vm, target, onClose = { vm.reading = null; vm.progressVersion++ }) }
         }
         return
     }
@@ -90,7 +130,12 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                         NavigationBarItem(
                             selected = vm.section == s,
                             onClick = { vm.openSeries = null; vm.section = s },
-                            icon = { Icon(s.icon, contentDescription = null) },
+                            icon = {
+                                androidx.compose.material3.BadgedBox(badge = {
+                                    val n = if (s == Section.Tracking) vm.importCount + vm.newsCount + vm.reviewCount else 0
+                                    if (n > 0) androidx.compose.material3.Badge { Text(if (n > 99) "99+" else "$n") }
+                                }) { Icon(s.icon, contentDescription = null) }
+                            },
                             label = { Text(s.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp) },
                         )
                     }
@@ -106,12 +151,22 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                     })
                 } else {
                     val section = vm.section
+                    io.github.gwenvador.bullarr.ui.Polling(60_000, vm.api) { vm.refreshBadges() }
                     Column(Modifier.fillMaxSize()) {
                         val sub = vm.subTab[section] ?: 0
                         if (section.subs.isNotEmpty()) {
                             PrimaryScrollableTabRow(selectedTabIndex = sub, edgePadding = 8.dp) {
                                 section.subs.forEachIndexed { i, label ->
-                                    Tab(selected = sub == i, onClick = { vm.subTab[section] = i }, text = { Text(label, maxLines = 1) })
+                                    Tab(selected = sub == i, onClick = { vm.subTab[section] = i; if (section == Section.Tracking && label == "Nouveautés") vm.markNewsSeen() }, text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(label, maxLines = 1)
+                                            val n = if (section == Section.Tracking) when (label) {
+                                                "Activité" -> vm.activityCount + vm.importCount
+                                                "Nouveautés" -> vm.newsCount; "Validation" -> vm.reviewCount; else -> 0
+                                            } else 0
+                                            if (n > 0) androidx.compose.material3.Badge { Text(if (n > 99) "99+" else "$n") }
+                                        }
+                                    })
                                 }
                             }
                         }
@@ -121,8 +176,11 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                 Section.Search -> SearchScreen(vm)
                                 Section.Tracking -> when (sub) {
                                     0 -> ActivityScreen(vm, snackbar)
-                                    1 -> ImportScreen(vm)
-                                    2 -> NewsScreen(vm, openSeries)
+                                    1 -> {
+                                        androidx.compose.runtime.LaunchedEffect(Unit) { vm.markNewsSeen() }
+                                        NewsScreen(vm, openSeries)
+                                    }
+                                    2 -> io.github.gwenvador.bullarr.ui.ValidationScreen(vm)
                                     else -> HistoryScreen(vm, openSeries)
                                 }
                                 Section.Actions -> when (sub) {

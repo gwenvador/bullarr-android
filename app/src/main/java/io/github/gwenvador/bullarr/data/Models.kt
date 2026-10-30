@@ -170,6 +170,8 @@ data class SeriesSummary(
     val sizeBytes: Long? = null,
     /** Nombre de votes Bédéthèque (`total_votes`). */
     val votes: Int = 0,
+    /** Genres (humour, fantasy…) : `local_genre`, plusieurs valeurs séparées par des virgules. */
+    val genres: List<String> = emptyList(),
 )
 
 /** Anciens (Europe, USA, Asie) et nouveaux (Franco-Belge, Comics, Manga) libellés d'origine de Bédéthèque → un seul jeu. */
@@ -205,6 +207,7 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         volumeCount = listOf("owned_tomes", "owned_integrals", "owned_hs", "owned_episodes", "owned_specials").sumOf { k -> it.int(k) ?: 0 },
         sizeBytes = it.long("total_size"),
         votes = it.int("total_votes") ?: 0,
+        genres = it.str("local_genre")?.split(',')?.map { g -> g.trim() }?.filter { g -> g.isNotEmpty() }.orEmpty(),
     )
 }
 

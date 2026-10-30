@@ -1,6 +1,19 @@
 package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.ReportProblem
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.Block
@@ -8,6 +21,7 @@ import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +54,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +76,15 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     var error by remember(summary.id) { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var shown by remember { mutableStateOf<VolumeRow?>(null) }
+    var sortKey by rememberSaveable { mutableStateOf("Numéro") }
+    var sortDesc by rememberSaveable { mutableStateOf(false) }
+    var status by rememberSaveable { mutableStateOf("Tous") }
+    var format by rememberSaveable { mutableStateOf("Tous") }
+    var menu by remember { mutableStateOf<VolumeRow?>(null) }
+    var editing by remember { mutableStateOf<VolumeRow?>(null) }
+    var deleting by remember { mutableStateOf<VolumeRow?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(summary.id, attempt) {
         error = null
         try { detail = parseSeriesDetail(api.getObject("api/series/${summary.id}")) } catch (e: Exception) { error = e.readable() }
@@ -73,6 +97,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
             windowInsets = WindowInsets(0),
         )
         val d = detail
+        LaunchedEffect(d) { if (d != null) vm.offline.adopt(d.id, d.volumes.filter { it.owned }.map { it.id to it.label }) }
         if (d == null && error == null) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             error?.let { item { ErrorCard(it, Modifier.padding(16.dp), onRetry = { attempt++ }) } }
@@ -88,35 +113,33 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     Text("Lire")
                 }
             }
-            if (d != null) item {
-                OutlinedButton(
-                    onClick = { onSearch(SearchContext(seriesId = d.id, seriesTitle = d.title, volumeId = null, volumeLabel = null, volumeNumber = null)) },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                ) {
-                    Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-                    Text("Chercher cette série")
-                }
-            }
             if (d != null) {
                 val owned = d.volumes.count { it.owned }
                 item {
-                    Text(
-                        "Tomes · $owned possédé(s) sur ${d.volumes.size}" + (d.totalKnown?.let { " (Bédéthèque : $it)" } ?: ""),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
-                    )
+                    Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Tomes · $owned/${d.volumes.size}" + (d.totalKnown?.let { " (Bédéthèque : $it)" } ?: ""),
+                            style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { onSearch(SearchContext(seriesId = d.id, seriesTitle = d.title, volumeId = null, volumeLabel = null, volumeNumber = null)) }) {
+                            Icon(Icons.Outlined.Search, contentDescription = "Chercher la série")
+                        }
+                        VolumeOrdering(vm, d.volumes, sortKey, sortDesc, status, format,
+                            onSort = { k -> if (sortKey == k) sortDesc = !sortDesc else { sortKey = k; sortDesc = k == "Taille" } },
+                            onStatus = { status = it }, onFormat = { format = it })
+                    }
                 }
                 if (d.volumes.isEmpty()) item { EmptyState("Aucun tome connu pour cette série") }
                 item {
                     Text(
-                        "Touchez un tome pour voir sa fiche ; la loupe le cherche pour le télécharger.",
+                        "Touchez un tome pour sa fiche, maintenez pour les actions ; la loupe le cherche pour le télécharger.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
-                items(d.volumes, key = { it.id }) { v ->
+                items(ordered(d.volumes, vm, sortKey, sortDesc, status, format), key = { it.id }) { v ->
                     VolumeItem(
-                        v, vm.coverUrl(v.coverPath), onOpen = { shown = v },
+                        v, vm.coverUrl(v.coverPath), onOpen = { shown = v }, onLongClick = { menu = v }, offline = vm.offline.isDownloaded(v.id),
                         offlineIcon = if (v.owned) ({ OfflineIcon(vm, v.id, "${d.title} · ${v.label}") }) else null,
                         onRead = if (v.owned) ({ vm.reading = ReaderTarget(v.id, "${d.title} · ${v.label}") }) else null,
                     ) {
@@ -131,6 +154,33 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 }
             }
         }
+    }
+    menu?.let { v ->
+        val title = "${detail?.title ?: summary.title} · ${v.label}"
+        fun run(ok: String, block: suspend () -> Unit) = launchAction(scope, context, ok, then = { attempt++ }) { block() }
+        VolumeActions(
+            v, vm, title, onDismiss = { menu = null },
+            onOpen = { shown = v },
+            onRead = { vm.reading = ReaderTarget(v.id, title) },
+            onSearch = { detail?.let { d -> onSearch(SearchContext(d.id, d.title, v.id, v.label, v.number, v.isIntegral, v.isHs, v.isEpisode)) } },
+            onEdit = { editing = v },
+            onRefresh = { run("Fichier actualisé") { ItemActions.refreshVolume(api, v.id) } },
+            onMeta = { run("Métadonnées mises à jour") { ItemActions.updateVolumeMetadata(api, v.id) } },
+            onDelete = { deleting = v },
+        )
+    }
+    editing?.let { v ->
+        EditVolumeDialog(v, onDismiss = { editing = null }) { f ->
+            launchAction(scope, context, "Tome modifié", then = { attempt++ }) { ItemActions.editVolume(api, v.id, f) }
+        }
+    }
+    deleting?.let { v ->
+        ConfirmDialog(
+            "Supprimer ${v.label} ?",
+            if (v.owned) "Le fichier du tome sera supprimé du disque ; la fiche reste en « manquant » pour pouvoir le retélécharger." else "La fiche de ce tome manquant sera retirée de la série.",
+            "Supprimer", onConfirm = { launchAction(scope, context, "Tome supprimé", then = { attempt++ }) { ItemActions.deleteVolume(api, v.id) } },
+            onDismiss = { deleting = null },
+        )
     }
     shown?.let { v ->
         VolumeSheet(vm, v, detail, summary, onDismiss = { shown = null }, onRead = {
@@ -169,6 +219,15 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
                         }
                     }
                     if (d?.monitored == true) IconTag(Icons.Outlined.Visibility, "Surveillée", cs.primary)
+                    if (d != null) {
+                        val owned = d.volumes.filter { it.owned }
+                        val got = owned.count { vm.offline.isDownloaded(it.id) }
+                        if (got > 0) IconTag(
+                            Icons.Outlined.OfflinePin,
+                            if (got == owned.size) "Tout est disponible hors ligne" else "$got sur ${owned.size} hors ligne",
+                            cs.primary, if (owned.size == 1) "Téléchargé" else "$got/${owned.size} téléchargé(s)",
+                        )
+                    }
                     if (d != null) SeriesOfflineIcon(vm, d.volumes.filter { it.owned }.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) })
                 }
             }
@@ -187,9 +246,10 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?) {
 }
 
 @Composable
-private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, offlineIcon: (@Composable () -> Unit)?, onRead: (() -> Unit)?, onSearch: () -> Unit) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongClick: () -> Unit, offline: Boolean, offlineIcon: (@Composable () -> Unit)?, onRead: (() -> Unit)?, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onLongClick).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Cover(cover, 44.dp)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -198,6 +258,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, offline
             val meta = if (v.owned) listOfNotNull(v.format?.uppercase(), formatBytes(v.fileSize), v.pageCount?.let { "$it p." }, v.year)
             else listOfNotNull(v.year)
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            if (offline) IconTag(Icons.Outlined.OfflinePin, "Disponible hors ligne", cs.primary, "Téléchargé sur le téléphone")
         }
         Spacer(Modifier.width(8.dp))
         if (!v.owned) IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary)
@@ -230,6 +291,7 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, s
                         c("communityrating")?.let { r ->
                             Text("★ $r / 5" + (c("communityratingcount")?.let { " ($it avis)" } ?: ""), style = MaterialTheme.typography.bodyMedium, color = cs.tertiary)
                         }
+                        if (vm.offline.isDownloaded(v.id)) IconTag(Icons.Outlined.OfflinePin, "Disponible hors ligne", cs.primary, "Téléchargé sur le téléphone")
                         if (v.owned) IconTag(Icons.Outlined.CheckCircle, "Possédé", cs.secondary, "Possédé")
                         else IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary, "Manquant")
                     }
@@ -267,6 +329,112 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, s
                     }
                     c("web")?.let { web -> OutlinedButton(onClick = { runCatching { uri.openUri(web) } }) { Text("Bédéthèque") } }
                     v.komgaUrl?.let { k -> OutlinedButton(onClick = { runCatching { uri.openUri(k) } }) { Text("Lire dans Komga") } }
+                }
+            }
+        }
+    }
+}
+
+/** Menu d'actions d'un tome (appui long). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VolumeActions(
+    v: VolumeRow, vm: AppViewModel, title: String, onDismiss: () -> Unit,
+    onOpen: () -> Unit, onRead: () -> Unit, onSearch: () -> Unit, onEdit: () -> Unit,
+    onRefresh: () -> Unit, onMeta: () -> Unit, onDelete: () -> Unit,
+) {
+    val mgr = vm.offline
+    val downloaded = mgr.isDownloaded(v.id)
+    @Composable
+    fun Entry(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color? = null, action: () -> Unit) {
+        androidx.compose.material3.ListItem(
+            headlineContent = { Text(label, color = tint ?: androidx.compose.ui.graphics.Color.Unspecified) },
+            leadingContent = { Icon(icon, contentDescription = null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant) },
+            modifier = Modifier.clickable { onDismiss(); action() },
+        )
+    }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            Entry(Icons.Outlined.Info, "Fiche du tome", action = onOpen)
+            if (v.owned) Entry(Icons.Outlined.PlayArrow, "Lire", action = onRead)
+            if (v.owned) {
+                if (downloaded) Entry(Icons.Outlined.DeleteSweep, "Supprimer la copie hors ligne") { mgr.delete(v.id) }
+                else if (mgr.active[v.id] == null) Entry(Icons.Outlined.DownloadForOffline, "Télécharger hors ligne") { mgr.start(v.id, title) }
+            }
+            Entry(Icons.Outlined.Search, if (v.owned) "Chercher (remplacer)" else "Chercher ce tome", action = onSearch)
+            Entry(Icons.Outlined.Edit, "Éditer les métadonnées", action = onEdit)
+            if (v.owned) Entry(Icons.Outlined.Refresh, "Actualiser taille et pages", action = onRefresh)
+            Entry(Icons.Outlined.Sync, "Mettre à jour (Bédéthèque)", action = onMeta)
+            Entry(Icons.Outlined.Delete, "Supprimer", MaterialTheme.colorScheme.error, onDelete)
+        }
+    }
+}
+
+private val SORT_KEYS = listOf("Numéro", "Titre", "Taille", "Année")
+private val STATUS_KEYS = listOf("Tous", "Possédés", "Manquants", "Hors ligne", "Non téléchargés")
+
+private fun ordered(all: List<VolumeRow>, vm: AppViewModel, sortKey: String, desc: Boolean, status: String, format: String): List<VolumeRow> {
+    val filtered = all.filter { v ->
+        when (status) {
+            "Possédés" -> v.owned
+            "Manquants" -> !v.owned
+            "Hors ligne" -> vm.offline.isDownloaded(v.id)
+            "Non téléchargés" -> v.owned && !vm.offline.isDownloaded(v.id)
+            else -> true
+        } && (format == "Tous" || v.format?.uppercase() == format)
+    }
+    val sorted = when (sortKey) {
+        "Titre" -> filtered.sortedBy { (it.title ?: it.label).lowercase() }
+        "Taille" -> filtered.sortedBy { it.fileSize ?: -1L }
+        "Année" -> filtered.sortedBy { it.year ?: "" }
+        else -> filtered
+    }
+    return if (desc) sorted.reversed() else sorted
+}
+
+/** Tri et filtre des tomes d'une série, comme dans la bibliothèque : deux icônes, un menu chacune. */
+@Composable
+private fun VolumeOrdering(
+    vm: AppViewModel, volumes: List<VolumeRow>, sortKey: String, desc: Boolean, status: String, format: String,
+    onSort: (String) -> Unit, onStatus: (String) -> Unit, onFormat: (String) -> Unit,
+) {
+    var sortMenu by remember { mutableStateOf(false) }
+    var filterMenu by remember { mutableStateOf(false) }
+    val formats = listOf("Tous") + volumes.mapNotNull { it.format?.uppercase() }.distinct().sorted()
+    val active = (if (status != "Tous") 1 else 0) + (if (format != "Tous") 1 else 0)
+    androidx.compose.foundation.layout.Box {
+        IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier les tomes") }
+        androidx.compose.material3.DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+            SORT_KEYS.forEach { k ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(k) },
+                    trailingIcon = { if (sortKey == k) Icon(if (desc) Icons.Outlined.ArrowDownward else Icons.Outlined.ArrowUpward, contentDescription = if (desc) "Décroissant" else "Croissant") },
+                    onClick = { onSort(k); sortMenu = false },
+                )
+            }
+        }
+    }
+    androidx.compose.foundation.layout.Box {
+        androidx.compose.material3.BadgedBox(badge = { if (active > 0) androidx.compose.material3.Badge { Text("$active") } }) {
+            IconButton(onClick = { filterMenu = true }) { Icon(Icons.Outlined.FilterList, contentDescription = "Filtrer les tomes") }
+        }
+        androidx.compose.material3.DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
+            STATUS_KEYS.forEach { k ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(k) },
+                    leadingIcon = { if (status == k) Icon(Icons.Outlined.Check, contentDescription = "Sélectionné") },
+                    onClick = { onStatus(k); filterMenu = false },
+                )
+            }
+            if (formats.size > 2) {
+                HorizontalDivider()
+                formats.forEach { k ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(if (k == "Tous") "Tous formats" else k) },
+                        leadingIcon = { if (format == k) Icon(Icons.Outlined.Check, contentDescription = "Sélectionné") },
+                        onClick = { onFormat(k); filterMenu = false },
+                    )
                 }
             }
         }

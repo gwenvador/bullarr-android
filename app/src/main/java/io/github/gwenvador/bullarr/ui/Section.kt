@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 enum class Section(val label: String, val icon: ImageVector, val subs: List<String>) {
     Library("Bibliothèque", Icons.Outlined.CollectionsBookmark, listOf("Bibliothèque", "Hors ligne")),
     Search("Recherche", Icons.Outlined.Search, emptyList()),
-    Tracking("Suivi", Icons.Outlined.Timeline, listOf("Activité", "Import", "Nouveautés", "Historique")),
+    Tracking("Suivi", Icons.Outlined.Timeline, listOf("Activité", "Nouveautés", "Validation", "Historique")),
     Actions("Actions", Icons.Outlined.Build, listOf("Enrichir", "Surveillance", "Vérification")),
     Config("Configuration", Icons.Outlined.Settings, listOf("Connexion", "Indexeurs", "Clients", "Notifications", "Imports", "Recherche", "Surveillance", "Accès", "Web")),
 }

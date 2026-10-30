@@ -86,7 +86,8 @@ private val Context.activity: Activity?
 
 @Composable
 fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
-    val api = vm.api ?: return
+    // Hors connexion (non connecté) : un client factice suffit, les albums copiés sont lus sans réseau.
+    val api = vm.api ?: remember { BullarrApi("http://localhost/", "") }
     val view = LocalView.current
     val context = LocalContext.current
 

@@ -1,5 +1,7 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.material.icons.outlined.PauseCircle
+import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Download
@@ -149,6 +151,14 @@ fun OfflineScreen(vm: AppViewModel) {
                     if (failedIds.isNotEmpty()) IconButton(onClick = { failedIds.forEach { mgr.start(it, mgr.titles[it] ?: "Album $it") } }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "Tout reprendre (${failedIds.size} en erreur)", tint = MaterialTheme.colorScheme.error)
                     }
+                    val runningIds = mgr.active.filter { it.value.error == null && !it.value.paused }.keys.toList()
+                    val pausedIds = mgr.active.filter { it.value.paused }.keys.toList()
+                    if (runningIds.isNotEmpty()) IconButton(onClick = { runningIds.forEach { mgr.pause(it) } }) {
+                        Icon(Icons.Outlined.Pause, contentDescription = "Tout mettre en pause")
+                    }
+                    if (pausedIds.isNotEmpty()) IconButton(onClick = { pausedIds.forEach { mgr.resume(it) } }) {
+                        Icon(Icons.Outlined.PlayArrow, contentDescription = "Tout reprendre les pauses (${pausedIds.size})", tint = MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(onClick = { mgr.active.keys.toList().forEach { mgr.cancel(it) } }) {
                         Icon(Icons.Outlined.Close, contentDescription = "Tout arrêter")
                     }
@@ -160,6 +170,8 @@ fun OfflineScreen(vm: AppViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(mgr.titles[id] ?: "Album $id", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (p.error != null) IconButton(onClick = { mgr.start(id, mgr.titles[id] ?: "Album $id") }) { Icon(Icons.Outlined.Refresh, contentDescription = "Reprendre") }
+                        else if (p.paused) IconButton(onClick = { mgr.resume(id) }) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Reprendre", tint = MaterialTheme.colorScheme.primary) }
+                        else IconButton(onClick = { mgr.pause(id) }) { Icon(Icons.Outlined.Pause, contentDescription = "Mettre en pause") }
                         IconButton(onClick = { mgr.cancel(id) }) { Icon(Icons.Outlined.Close, contentDescription = "Arrêter") }
                     }
                     if (p.error != null) ErrorCard(p.error)
@@ -168,7 +180,7 @@ fun OfflineScreen(vm: AppViewModel) {
                             progress = { if (p.total > 0) p.done.toFloat() / p.total else 0f },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Text(if (p.total > 0) "${p.done} / ${p.total} pages" else "Préparation…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text((if (p.paused) "En pause · " else "") + (if (p.total > 0) "${p.done} / ${p.total} pages" else "Préparation…"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -340,6 +352,9 @@ fun OfflineIcon(vm: AppViewModel, volumeId: Int, title: String) {
         onGiveUp = { showError = false; mgr.cancel(volumeId) },
     )
     when {
+        progress != null && progress.paused -> IconButton(onClick = { mgr.resume(volumeId) }) {
+            Icon(Icons.Outlined.PauseCircle, contentDescription = "En pause — reprendre", tint = cs.primary)
+        }
         progress != null && progress.error == null -> IconButton(onClick = { mgr.cancel(volumeId) }) {
             Box(contentAlignment = Alignment.Center) {
                 if (progress.done > 0 && progress.total > 0) androidx.compose.material3.CircularProgressIndicator(

@@ -10,6 +10,7 @@ import io.github.gwenvador.bullarr.data.BullarrApi
 import io.github.gwenvador.bullarr.data.Library
 import io.github.gwenvador.bullarr.data.SeriesSummary
 import io.github.gwenvador.bullarr.data.Settings
+import io.github.gwenvador.bullarr.data.int
 import io.github.gwenvador.bullarr.data.parseLibraries
 import io.github.gwenvador.bullarr.data.parseSeriesList
 import io.github.gwenvador.bullarr.data.SessionAuth
@@ -65,6 +66,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         libraries = emptyList(); series = emptyList(); libraryError = null; selectedLibrary = null
     }
 
+    /** Connexion SSO par navigateur : état affiché sur l'écran de connexion. */
+    var ssoBusy by mutableStateOf(false)
+    var ssoError by mutableStateOf<String?>(null)
+
+    /** Appelé quand le navigateur renvoie bullarr://auth?code=… : échange le code et ouvre la session. */
+    fun completeSso(code: String) {
+        val url = settings.serverUrl.ifBlank { settings.lastUrl }
+        if (url.isBlank()) { ssoError = "URL du serveur inconnue : saisissez-la puis relancez le SSO."; return }
+        ssoBusy = true; ssoError = null
+        viewModelScope.launch {
+            try {
+                val probe = BullarrApi(url, "", SessionAuth(""))
+                val cookie = probe.exchangeAppCode(code)
+                val check = BullarrApi(url, "", SessionAuth(cookie))
+                if (check.getObject("api/auth/me").optJSONObject("user") == null) throw io.github.gwenvador.bullarr.data.ApiException("Le serveur n'a pas reconnu la session SSO.")
+                save(url, "", "oidc", cookie = cookie)
+            } catch (e: Exception) {
+                ssoError = e.readable()
+            } finally {
+                ssoBusy = false
+            }
+        }
+    }
+
     val search = SearchState(viewModelScope) { api }
 
     /** Incrémenté à la fermeture du lecteur : les listes relisent l'état de lecture. */
@@ -104,7 +129,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Démarre le service au premier plan dès qu'un téléchargement tourne.
         viewModelScope.launch {
-            androidx.compose.runtime.snapshotFlow { offline.active.values.any { it.error == null } }
+            androidx.compose.runtime.snapshotFlow { offline.active.values.any { it.error == null && !it.paused } }
                 .collect { running -> if (running) io.github.gwenvador.bullarr.data.DownloadService.start(app) }
         }
     }
@@ -134,6 +159,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var series by mutableStateOf<List<SeriesSummary>>(emptyList()); private set
     var libraryLoading by mutableStateOf(false); private set
     var libraryError by mutableStateOf<String?>(null); private set
+    /** Validations manuelles en attente (badge de l'onglet Suivi). */
+    var reviewCount by androidx.compose.runtime.mutableIntStateOf(0)
+    var importCount by androidx.compose.runtime.mutableIntStateOf(0)
+    var newsCount by androidx.compose.runtime.mutableIntStateOf(0)
+    var activityCount by androidx.compose.runtime.mutableIntStateOf(0)
+    private val badgePrefs = app.getSharedPreferences("badges", android.content.Context.MODE_PRIVATE)
+
+    /** Nouveautés : comme sur le web, « nouveau » = arrivé depuis la dernière ouverture de l'onglet. */
+    fun markNewsSeen() {
+        badgePrefs.edit().putString("newsSeen", java.time.Instant.now().toString()).apply()
+        newsCount = 0
+    }
+
+    /** Pastilles des onglets de Suivi (mêmes sources que les badges du web : nav.js). */
+    suspend fun refreshBadges() {
+        val client = api ?: return
+        try { reviewCount = client.getObject("api/auto-acquire/reviews/count").int("count") ?: 0 } catch (_: Exception) {}
+        try { importCount = client.getObject("api/import/pending-count").int("waiting_file_count") ?: 0 } catch (_: Exception) {}
+        try {
+            val since = badgePrefs.getString("newsSeen", null) ?: java.time.Instant.now().toString().also { badgePrefs.edit().putString("newsSeen", it).apply() }
+            newsCount = client.getObject("api/ebdz/nouveautes/new-count", mapOf("since" to since)).int("count") ?: 0
+        } catch (_: Exception) {}
+        try {
+            val st = io.github.gwenvador.bullarr.data.parseActivity(client.getObject("api/activity/status"))
+            activityCount = st.clients.sumOf { it.items.size } + st.pending.size
+        } catch (_: Exception) {}
+    }
     var query by mutableStateOf("")
     var filters by mutableStateOf(LibraryFilters())
     var sort by mutableStateOf(LibrarySort.Title)

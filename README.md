@@ -7,30 +7,50 @@ Interface en français, thème clair ou sombre selon le réglage du téléphone.
 ## Installation
 
 1. Téléchargez `bullarr-android-<version>.apk` depuis les
-   [releases de Bullarr](https://github.com/gwenvador/bullarr/releases), ouvrez-le sur le
+   [releases de l'application](https://github.com/gwenvador/bullarr-android/releases), ouvrez-le sur le
    téléphone et autorisez l'installation d'applications inconnues si Android le demande.
    Avec un câble USB : `adb install -r bullarr-android-<version>.apk`.
-2. Au premier lancement, renseignez :
-   - **URL du serveur** : par exemple `http://192.168.1.10:4000`, le nom du serveur sur
-     votre réseau (Tailscale…) suivi de `:4000`, ou l'adresse publique de Bullarr. Sans `http://`, l'app l'ajoute. Le HTTP en clair est autorisé.
-   - **Clé API** : dans Bullarr, ouvrez **Paramètres → Login → carte « Accès API »**,
-     générez la clé puis copiez-la.
-3. Touchez **Tester** : l'app appelle `GET /api/auth/me` avec l'en-tête `X-Api-Key`.
-   Une clé fausse donne « Clé API invalide ». Touchez ensuite **Enregistrer**.
+2. Au premier lancement, renseignez l'**URL du serveur** (par exemple `http://192.168.1.10:4000`,
+   le nom du serveur sur votre réseau suivi de `:4000`, ou l'adresse publique de Bullarr ; sans
+   `http://`, l'app l'ajoute, et le HTTP en clair est autorisé), puis choisissez le mode d'accès :
+   - **Clé API** : dans Bullarr, **Paramètres → Login → carte « Accès API »**, générez la clé puis
+     copiez-la. Elle part dans l'en-tête `X-Api-Key`. Si l'authentification de Bullarr est
+     désactivée, laissez la clé vide.
+   - **Compte** : identifiant et mot de passe de Bullarr. L'app ouvre une session
+     (`POST /login/password`), gère le jeton CSRF et se reconnecte seule à l'expiration.
+   - **SSO** : l'identification OIDC se déroule dans une fenêtre intégrée ; l'app récupère la
+     session à la fin. À l'expiration, il faut se reconnecter.
+3. Touchez **Se connecter**. Une fois connecté, l'onglet **Connexion** propose **Tester**,
+   **Se déconnecter** (efface clé, identifiants et session ; les albums hors ligne restent) et
+   la vérification des mises à jour.
 
-L'URL et la clé sont chiffrées sur l'appareil (EncryptedSharedPreferences, clé maître
-dans le Keystore Android). Vous pouvez les changer dans l'onglet **Connexion**.
+URL, clé, identifiants et session sont chiffrés sur l'appareil (EncryptedSharedPreferences,
+clé maître dans le Keystore Android).
+
+**Mises à jour** : Configuration → Connexion affiche la version installée et compare avec la
+dernière release GitHub (l'APK doit s'appeler `bullarr-android-<version>.apk`).
 
 ## Navigation
 
 La barre du bas reprend les 5 rubriques de la barre latérale web :
 
-- **Bibliothèque** : séries, fiche série. Toucher un tome ouvre sa fiche (résumé, auteurs,
-  éditeur, note, fichier) ; la loupe à droite le cherche pour le télécharger.
+- **Bibliothèque** : séries avec drapeau d'origine (BD, Comics, Manga), recherche, **filtres**
+  (genre, type, année, dernière mise à jour, votes, nombre de volumes, taille) et **tri**
+  (alphabétique, popularité, date, taille). Toucher un tome ouvre sa fiche (résumé, auteurs,
+  éditeur, note, fichier) ; la loupe à droite le cherche pour le télécharger. L'onglet
+  **Hors ligne** liste les albums copiés sur le téléphone (voir plus bas). Un **appui long** sur
+  une série la sélectionne (plusieurs possibles) : télécharger hors ligne, mettre à jour les
+  métadonnées Bédéthèque, scanner, supprimer. Le bouton **+** ajoute une série par son nom
+  (recherche Bédéthèque). Dans une série, un appui long sur un tome ouvre ses actions (lire,
+  hors ligne, chercher, éditer, actualiser, mettre à jour, supprimer) ; tri et filtre des tomes
+  en haut de la liste ; l'état « téléchargé » est indiqué sur chaque tome.
 - **Recherche** : toutes les sources, envoi au client de téléchargement.
-- **Suivi** : Activité (téléchargements), Import, Nouveautés (Tout, RSS, Telegram, EBDZ),
-  Historique (imports, téléchargements, actions).
-- **Actions** : Enrichir (Indispensables BD, Panthéon), Surveillance (activer ou couper la
+- **Suivi** : Activité (téléchargements, avec pause, reprise, « en premier » et suppression ;
+  état de l'import en tête ; appui long pour sélectionner : supprimer, assigner ou corriger la série,
+  **import manuel** avec conversion des dossiers JPG en CBZ ; erreur affichée pour un dossier non importable),
+  Nouveautés (Tout, RSS, Telegram, EBDZ), Validation (choix manuels de l'acquisition automatique),
+  Historique (imports, téléchargements, actions, filtre par type). Des pastilles comptent les éléments en attente.
+- **Actions** : Enrichir (Indispensables BD, Panthéon, Thèmes, Top 100 BDGest, Par auteur), Surveillance (activer ou couper la
   surveillance d'une série), Vérification (rapports en lecture seule).
 - **Configuration** : Connexion (URL et clé API de l'app), puis les réglages de Bullarr
   eux-mêmes — Indexeurs (Prowlarr, Fourtoutici, Anna's Archive, VK), Clients (aMule,
@@ -44,20 +64,36 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
 
 Dans Nouveautés, chaque ligne a un bouton Télécharger et un menu : ⚡ « Ajouter la série et
 télécharger » (comme sur la page web), ouvrir la série, ouvrir la source, copier le lien,
-chercher ailleurs. Chaque champ de saisie a une croix pour l'effacer.
+chercher ailleurs. Chaque champ de saisie a une croix pour l'effacer. Les boutons sont des icônes : un appui long
+affiche leur nom (infobulle).
+
+## Lecture et albums hors ligne
+
+Un tome possédé se lit dans l'app (bouton ▶) : pages en plein écran, zoom au pincement,
+largeur de page ajustable, reprise à la dernière page. Les pages viennent du lecteur de
+Bullarr (`GET /api/volumes/<id>/reader`, `…/reader/page/<n>`), qui sert des images quel que soit
+le format du fichier (CBZ, CBR, PDF).
+
+Le bouton de téléchargement d'un tome (ou de la série entière) copie ces pages sur le
+téléphone pour les lire sans réseau. Les téléchargements tournent dans un service au premier
+plan : ils continuent écran éteint, avec une notification (avancement, **Pause** ou
+**Reprendre**, **Arrêter**). L'onglet **Hors ligne** permet de rechercher, trier, replier par
+série, marquer lu ou non lu, mettre en pause ou reprendre, relancer les erreurs d'un coup et
+supprimer des copies. Il ne contacte jamais le serveur.
 
 ## Écrans et routes utilisées
 
 | Écran | Routes |
 |---|---|
-| Connexion | `GET /api/auth/me` |
-| Activité (rafraîchie toutes les 4 s) | `GET /api/activity/status` ; `POST /api/activity/download-control` avec `{"tracking_id": N, "action": "pause"\|"resume"\|"top"}` |
+| Connexion | `GET /api/auth/me`, `POST /login/password`, `GET /login/redirect` (SSO), `GET /api/auth/csrf`, `GET /logout` |
+| Activité (rafraîchie toutes les 4 s) | `GET /api/activity/status` ; `POST /api/activity/download-control` avec `{"tracking_id": N, "action": "pause"\|"resume"\|"top"}` ; suppression : `POST /api/activity/pending/remove` ou `POST /api/{qbittorrent,rtorrent,deluge,emule}/remove` |
 | Bibliothèque | `GET /api/libraries`, `GET /api/library/<id>/series`, couvertures sous `/covers/…` |
+| Lecteur et hors ligne | `GET /api/volumes/<id>/reader`, `GET /api/volumes/<id>/reader/page/<n>` |
 | Détail d'une série | `GET /api/series/<id>` (la réponse contient déjà les tomes) |
 | Recherche | `POST /api/missing-monitor/search` (une requête par source, en parallèle) ; envoi : `POST /api/{qbittorrent,rtorrent,deluge}/add`, `/api/emule/add`, `/api/telegram-channels/download`, `/api/fourtoutici/download`, `/api/vk/download` ; contrôle de remplacement : `POST /api/import/replacement-required` |
 | Nouveautés | RSS : `GET /api/ebdz/rss/latest` ; Telegram : `GET /api/telegram-channels/latest?days=15` ; EBDZ : `GET /api/ebdz/latest` |
 | Nouveautés, actions | envois ci-dessus ; ⚡ : `GET /api/bedetheque/info`, `POST /api/bedetheque/add-series`, `POST /api/auto-acquire/reviews/series-match`, `GET /api/search/prowlarr` |
-| Configuration | `GET`/`POST` `/api/{emule,qbittorrent,rtorrent,deluge,shelfmark,komga,prowlarr,fourtoutici,annas-archive,vk,telegram}/config`, `/api/import/config`, `/api/missing-monitor/config` ; tests : `…/test` |
+| Configuration | `GET`/`POST` `/api/{emule,qbittorrent,rtorrent,deluge,shelfmark,komga,prowlarr,fourtoutici,annas-archive,vk,telegram}/config`, `/api/ebdz/config`, `/api/ebdz/auto-scrape/config`, `/api/settings/rename`, `/api/auth/config`, `/api/import/config`, `/api/missing-monitor/config` ; tests : `…/test` |
 | Historique | `GET /api/import/history`, `/api/missing-monitor/history`, `/api/actions/history` |
 | Enrichir | `GET /api/bedetheque/indispensables`, `/api/bedetheque/pantheon`, `POST /api/bedetheque/add-series` |
 | Surveillance | `GET /api/missing-monitor/libraries`, `/api/missing-monitor/libraries/<id>/series`, `POST /api/missing-monitor/series/<id>/monitor` |
@@ -101,8 +137,8 @@ inchangés. Le bouton Tester utilise les réglages **enregistrés**.
 - Il n'existe pas de route de recherche de séries. La recherche filtre donc dans l'app
   la liste complète des séries (quelques secondes pour une grande bibliothèque), sans tenir
   compte des accents.
-- L'écran Import est en lecture seule : il affiche le fichier en cours, les fichiers
-  réservés et les compteurs. Il ne lance ni n'arrête aucun import.
+- L'état de l'import (en tête de l'Activité) est en lecture seule : fichier en cours, fichiers
+  réservés et compteurs. L'import manuel passe par la sélection d'un téléchargement.
 
 ## Compiler
 

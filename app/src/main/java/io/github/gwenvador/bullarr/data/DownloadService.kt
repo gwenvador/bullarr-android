@@ -40,6 +40,8 @@ class DownloadService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val mgr = manager
+        if (intent?.action == ACTION_PAUSE) { mgr?.active?.keys?.toList()?.forEach { mgr.pause(it) }; return START_NOT_STICKY }
+        if (intent?.action == ACTION_RESUME) { mgr?.active?.filter { it.value.paused }?.keys?.toList()?.forEach { mgr.resume(it) }; return START_NOT_STICKY }
         if (intent?.action == ACTION_STOP) {
             mgr?.active?.keys?.toList()?.forEach { mgr.cancel(it) }
             stopSelf()
@@ -53,7 +55,8 @@ class DownloadService : Service() {
         acquireLocks()
         if (watcher == null) watcher = scope.launch {
             snapshotFlow { mgr.running() }.collect { st ->
-                if (st.count == 0) { stopSelf() } else {
+                if (st.count + st.paused == 0) { stopSelf() } else {
+                    if (st.count == 0) releaseLocks() else acquireLocks()
                     getSystemService(NotificationManager::class.java).notify(NOTIF_ID, build(st))
                 }
             }
@@ -63,14 +66,21 @@ class DownloadService : Service() {
 
     private fun build(st: Running): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val pause = PendingIntent.getService(this, 2, Intent(this, DownloadService::class.java).setAction(ACTION_PAUSE), PendingIntent.FLAG_IMMUTABLE)
+        val resume = PendingIntent.getService(this, 3, Intent(this, DownloadService::class.java).setAction(ACTION_RESUME), PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, DownloadService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(if (st.count > 1) "${st.count} albums en cours de téléchargement" else "Téléchargement hors ligne")
+            .setContentTitle(when {
+                st.count == 0 -> "Téléchargement en pause"
+                st.count > 1 -> "${st.count} albums en cours de téléchargement"
+                else -> "Téléchargement hors ligne"
+            })
             .setContentText(if (st.total > 0) "${st.done} / ${st.total} pages" else "Préparation…")
-            .setProgress(st.total, st.done, st.total == 0)
+            .setProgress(st.total, st.done, st.total == 0 && st.count > 0)
             .setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
             .setContentIntent(open)
+            .addAction(0, if (st.count == 0) "Reprendre" else "Pause", if (st.count == 0) resume else pause)
             .addAction(0, "Arrêter", stop)
             .build()
     }
@@ -92,26 +102,34 @@ class DownloadService : Service() {
             .apply { acquire() }
     }
 
+    @Suppress("DEPRECATION")
+    private fun releaseLocks() {
+        runCatching { wake?.takeIf { it.isHeld }?.release() }; wake = null
+        runCatching { wifi?.takeIf { it.isHeld }?.release() }; wifi = null
+    }
+
     override fun onTimeout(startId: Int, fgsType: Int) { stopSelf() }
 
     override fun onDestroy() {
         watcher?.cancel(); scope.cancel()
-        runCatching { wake?.takeIf { it.isHeld }?.release() }
-        runCatching { wifi?.takeIf { it.isHeld }?.release() }
+        releaseLocks()
         super.onDestroy()
     }
 
-    data class Running(val count: Int, val done: Int, val total: Int)
+    data class Running(val count: Int, val done: Int, val total: Int, val paused: Int = 0)
 
     companion object {
         private const val CHANNEL = "downloads"
         private const val NOTIF_ID = 42
+        private const val ACTION_PAUSE = "io.github.gwenvador.bullarr.PAUSE_DOWNLOADS"
+        private const val ACTION_RESUME = "io.github.gwenvador.bullarr.RESUME_DOWNLOADS"
         private const val ACTION_STOP = "io.github.gwenvador.bullarr.STOP_DOWNLOADS"
         @Volatile var manager: OfflineManager? = null
 
         private fun OfflineManager.running(): Running {
-            val r = active.values.filter { it.error == null }
-            return Running(r.size, r.sumOf { it.done }, r.sumOf { it.total })
+            val r = active.values.filter { it.error == null && !it.paused }
+            val p = active.values.filter { it.error == null && it.paused }
+            return Running(r.size, (r + p).sumOf { it.done }, (r + p).sumOf { it.total }, p.size)
         }
 
         /** À appeler quand un téléchargement démarre (app au premier plan). */

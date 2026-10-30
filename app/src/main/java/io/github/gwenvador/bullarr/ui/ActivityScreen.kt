@@ -12,6 +12,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.MoveToInbox
+import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Schedule
@@ -53,6 +60,9 @@ import io.github.gwenvador.bullarr.data.readable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import io.github.gwenvador.bullarr.data.objects
+import io.github.gwenvador.bullarr.data.int
+import io.github.gwenvador.bullarr.data.str
 
 /** Rejoue [block] toutes les [intervalMs] tant que l'écran est visible (pas en arrière-plan). */
 @Composable
@@ -78,6 +88,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var refreshing by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+    val importInfo = rememberImportInfo(vm)
 
     suspend fun refresh() {
         try {
@@ -131,6 +142,88 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         }
     }
 
+    // Sélection multiple (appui long) : suppression groupée des téléchargements choisis.
+    var selected by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var confirmBatch by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptyList() }
+    fun toggle(key: String) { selected = if (key in selected) selected - key else selected + key }
+    val deleters = HashMap<String, suspend () -> Unit>()
+    val trackers = HashMap<String, Int>()
+    val names = HashMap<String, String>()
+    var assigning by remember { mutableStateOf(false) }
+    var confirmImport by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+    var adding by remember { mutableStateOf(false) }
+    var assignVolume by remember { mutableStateOf<Int?>(null) }
+    fun assign(seriesId: Int, volume: Int?) {
+        val ids = selected.mapNotNull { trackers[it] }
+        selected = emptyList()
+        scope.launch {
+            var failed: String? = null
+            ids.forEach { tid ->
+                try {
+                    api.postObject("api/activity/update-tracking", JSONObject().put("tracking_id", tid).put("series_id", seriesId).apply { if (volume != null) put("volume_number", volume) })
+                } catch (e: Exception) { failed = e.readable() }
+            }
+            snackbar.showSnackbar(failed ?: "${ids.size} téléchargement(s) assigné(s)")
+            refresh()
+        }
+    }
+    status?.let { st ->
+        st.clients.forEach { c -> c.items.forEach { item ->
+            val key = "a-${c.client}-${item.clientId ?: item.name}"
+            val tid = item.trackingId
+            names[key] = item.seriesTitle ?: item.name
+            if (tid != null) trackers[key] = tid
+            if (tid != null) deleters[key] = { api.postObject("api/activity/pending/remove", JSONObject().put("id", tid)); Unit }
+            else if (item.clientId != null && c.client in removeUrls) deleters[key] = { api.postObject(removeUrls.getValue(c.client), JSONObject().put("id", item.clientId)); Unit }
+        } }
+        st.pending.forEach { p -> trackers["p-${p.id}"] = p.id; names["p-${p.id}"] = p.seriesTitle ?: p.title }
+        st.pending.forEach { p -> deleters["p-${p.id}"] = { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit } }
+    }
+    if (importing) androidx.compose.material3.AlertDialog(
+        onDismissRequest = {}, confirmButton = {},
+        title = { Text("Import manuel en cours") },
+        text = { LinearProgressIndicator(Modifier.fillMaxWidth()) },
+    )
+    if (confirmImport) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmImport = false },
+        title = { Text(if (selected.count { it in trackers } > 1) "Importer ces albums ?" else "Importer cet album ?") },
+        text = { Text("Les fichiers JPG seront convertis en CBZ.") },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmImport = false
+                val ids = selected.mapNotNull { trackers[it] }.toSet(); selected = emptyList(); importing = true
+                scope.launch {
+                    val message = try { manualImport(api, ids) } catch (e: Exception) { e.readable() }
+                    importing = false
+                    snackbar.showSnackbar(message, duration = androidx.compose.material3.SnackbarDuration.Long)
+                    refresh()
+                }
+            }) { Text("Importer") }
+        },
+        dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Annuler") } },
+    )
+    if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { adding = true }, onPick = { sid, vol -> assign(sid, vol) })
+    if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName(selected.firstOrNull()?.let { names[it] }), onAdded = { sid, _ -> assign(sid, null) })
+    if (confirmBatch) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmBatch = false },
+        title = { Text("Supprimer ${selected.size} téléchargement(s) ?") },
+        text = { Text("Ils sont annulés chez le client et retirés de la file de Bullarr.") },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmBatch = false
+                val keys = selected; selected = emptyList()
+                scope.launch {
+                    var failed: String? = null
+                    keys.forEach { k -> try { deleters[k]?.invoke() } catch (e: Exception) { failed = e.readable() } }
+                    snackbar.showSnackbar(failed ?: "${keys.size} téléchargement(s) supprimé(s)")
+                    refresh()
+                }
+            }) { Text("Supprimer") }
+        },
+        dismissButton = { TextButton(onClick = { confirmBatch = false }) { Text("Annuler") } },
+    )
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = { refreshing = true; scope.launch { refresh(); refreshing = false } },
@@ -141,7 +234,18 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item { Text("Activité", style = MaterialTheme.typography.headlineSmall) }
+            item {
+                if (selected.isEmpty()) Text("Activité", style = MaterialTheme.typography.headlineSmall)
+                else Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { selected = emptyList() }) { Icon(Icons.Outlined.Close, contentDescription = "Annuler la sélection") }
+                    Text("${selected.size}", style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { selected = deleters.keys.toList() }) { Icon(Icons.Outlined.SelectAll, contentDescription = "Tout sélectionner") }
+                    IconButton(onClick = { confirmImport = true }, enabled = selected.any { it in trackers }) { Icon(Icons.Outlined.MoveToInbox, contentDescription = "Importer maintenant (import manuel)") }
+                    IconButton(onClick = { assigning = true }, enabled = selected.any { it in trackers }) { Icon(Icons.Outlined.Link, contentDescription = "Assigner ou corriger la série") }
+                    IconButton(onClick = { confirmBatch = true }) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer la sélection", tint = MaterialTheme.colorScheme.error) }
+                }
+            }
+            importItems(importInfo)
             error?.let { item { ErrorCard(it, onRetry = { scope.launch { refresh() } }) } }
             val st = status
             if (st == null && error == null) item { EmptyState("Chargement…") }
@@ -153,8 +257,10 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 item { SectionTitle("En cours", active.size) }
                 if (active.isEmpty()) item { Text("Aucun téléchargement actif chez les clients.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(active, key = { "a-${it.first.client}-${it.second.clientId ?: it.second.name}" }) { (c, item) ->
+                    val key = "a-${c.client}-${item.clientId ?: item.name}"
                     DownloadCard(
-                        item, c.label,
+                        item, c.label, selected = key in selected,
+                        onLongClick = { if (key in deleters) toggle(key) }, onTap = { if (selected.isNotEmpty() && key in deleters) toggle(key) },
                         controllable = item.trackingId != null && c.client in CONTROLLABLE,
                         busy = busy == item.trackingId,
                         onAction = { a -> item.trackingId?.let { control(it, a) } },
@@ -168,11 +274,12 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         }) else null,
                     )
                 }
-                item { SectionTitle("En attente d'import ou de téléchargement", st.pending.size) }
+                item { SectionTitle("En attente d'import", st.pending.size) }
                 if (st.pending.isEmpty()) item { Text("Rien en attente.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(st.pending, key = { "p-${it.id}" }) { p ->
                     PendingCard(
-                        p,
+                        p, problem = importInfo.blocked[p.id], selected = "p-${p.id}" in selected,
+                        onLongClick = { toggle("p-${p.id}") }, onTap = { if (selected.isNotEmpty()) toggle("p-${p.id}") },
                         controllable = p.status == "pending" && p.client in CONTROLLABLE &&
                             (p.client == "telegram" || p.clientItemId != null),
                         busy = busy == p.id,
@@ -201,8 +308,12 @@ private fun isPausedState(state: String?): Boolean {
 }
 
 @Composable
-private fun DownloadCard(item: DownloadItem, clientLabel: String, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit, onDelete: (() -> Unit)?) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun DownloadCard(item: DownloadItem, clientLabel: String, selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit, onDelete: (() -> Unit)?) {
+    Card(
+        modifier = Modifier.selectable(selected, onLongClick, onTap),
+        colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 listOfNotNull(item.seriesTitle, item.volume.ifBlank { null }).joinToString(" · ").ifBlank { item.name },
@@ -231,19 +342,24 @@ private fun DownloadCard(item: DownloadItem, clientLabel: String, controllable: 
 }
 
 @Composable
-private fun PendingCard(p: PendingDownload, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit, onDelete: (() -> Unit)?) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun PendingCard(p: PendingDownload, problem: String?, selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit, controllable: Boolean, busy: Boolean, onAction: (String) -> Unit, onDelete: (() -> Unit)?) {
+    Card(
+        modifier = Modifier.selectable(selected, onLongClick, onTap),
+        colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     listOfNotNull(p.seriesTitle, p.volume.ifBlank { null }).joinToString(" · ").ifBlank { p.title },
                     style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 )
-                val (label, icon, tint) = statusLabel(p)
+                val (label, icon, tint) = if (problem != null) Triple("Import impossible", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error) else statusLabel(p)
                 StatusIcon(icon, label, tint, 22.dp)
             }
             Text(p.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             val total = p.bytesTotal
             if (p.status == "pending" && total != null && total > 0) {
                 val done = (p.bytesDownloaded ?: 0L).toFloat() / total
@@ -300,4 +416,52 @@ private fun Controls(paused: Boolean, busy: Boolean, onAction: (String) -> Unit,
 @Composable
 private fun ActionButton(label: String, icon: ImageVector, busy: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick, enabled = !busy) { Icon(icon, contentDescription = label) }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun Modifier.selectable(selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit): Modifier =
+    this.combinedClickable(onClick = onTap, onLongClick = onLongClick)
+
+/** Nom de série probable à partir d'un nom de fichier de release (« Tomka.le.gitan.FR.[JPG]-NOTAG » → « Tomka le gitan »). */
+private fun guessSeriesName(raw: String?): String {
+    if (raw.isNullOrBlank()) return ""
+    var t = raw.replace(Regex("\\[[^]]*]|\\([^)]*\\)"), " ").replace(Regex("-[A-Za-z0-9]+$"), "")
+    t = t.replace('.', ' ').replace('_', ' ')
+    val noise = setOf("fr", "french", "notag", "cbz", "cbr", "pdf", "scan", "comics", "bd", "ebook", "hd", "jpg")
+    return t.split(Regex("\\s+")).filter { it.isNotBlank() && it.lowercase() !in noise }.joinToString(" ").trim()
+}
+
+/**
+ * Import manuel des téléchargements suivis [trackingIds] (comme la page /import du web) : les dossiers de pages
+ * en vrac sont convertis en CBZ, puis les fichiers prêts sont importés (POST /api/import/execute).
+ * Renvoie un résumé lisible, avec le détail de chaque échec.
+ */
+private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrApi, trackingIds: Set<Int>): String {
+    fun JSONObject.dest() = optJSONObject("destination")
+    var state = api.getObject("api/import/state")
+    val notes = mutableListOf<String>()
+    val folders = state.optJSONArray("incompatible_folders").objects().filter { (it.int("pack_download_id") ?: -1) in trackingIds }
+    for (f in folders) {
+        try {
+            api.postObject("api/import/incompatible-folder/convert-to-cbz", JSONObject().put("import_root", f.str("import_root") ?: "").put("relative_path", f.str("relative_path") ?: ""))
+            notes += "${f.str("folder_name")} converti en CBZ"
+        } catch (e: Exception) { notes += "${f.str("folder_name")} : conversion impossible (${e.readable()})" }
+    }
+    if (folders.isNotEmpty()) state = api.getObject("api/import/state")
+    val files = state.optJSONArray("files").objects().filter { (it.dest()?.int("tracking_id") ?: -1) in trackingIds }
+    val ready = files.filter { it.dest()?.int("series_id") != null }
+    val unassigned = files.size - ready.size
+    if (unassigned > 0) notes += "$unassigned fichier(s) sans série assignée (utilisez « Assigner la série » d'abord)"
+    if (ready.isEmpty()) {
+        return (listOf("Rien à importer pour cette sélection.") + notes).joinToString("\n")
+    }
+    val res = api.postObject("api/import/execute", JSONObject().put("files", org.json.JSONArray(ready)))
+    val parts = listOfNotNull(
+        res.int("imported_count")?.takeIf { it > 0 }?.let { "$it importé(s)" },
+        res.int("replaced_count")?.takeIf { it > 0 }?.let { "$it remplacé(s)" },
+        res.int("skipped_count")?.takeIf { it > 0 }?.let { "$it ignoré(s)" },
+        res.int("failed_count")?.takeIf { it > 0 }?.let { "$it en échec" },
+    )
+    val failures = res.optJSONArray("failures")?.let { a -> (0 until a.length()).map { a.opt(it).toString() } }.orEmpty()
+    return (listOf(parts.joinToString(" · ").ifBlank { "Import terminé." }) + failures.take(3) + notes).joinToString("\n")
 }

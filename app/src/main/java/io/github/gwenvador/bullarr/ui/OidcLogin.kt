@@ -36,7 +36,7 @@ import io.github.gwenvador.bullarr.data.BullarrApi
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun OidcLoginDialog(serverUrl: String, onCookie: (String) -> Unit, onCancel: () -> Unit) {
+fun OidcLoginDialog(serverUrl: String, onCookie: (cookie: String, origin: String) -> Unit, onCancel: () -> Unit) {
     val base = BullarrApi.normalizeBaseUrl(serverUrl)
     val cookies = CookieManager.getInstance()
     var problem by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
@@ -70,10 +70,16 @@ fun OidcLoginDialog(serverUrl: String, onCookie: (String) -> Unit, onCancel: () 
                                     if (done) return
                                     val u = android.net.Uri.parse(url)
                                     val path = u.path.orEmpty()
-                                    val ours = u.host == base.host && (u.port.takeIf { it > 0 } ?: base.port) == base.port
-                                    if (ours && !path.startsWith("/login") && path != "/callback") {
-                                        val c = cookies.getCookie(base.toString()).orEmpty()
-                                        if (c.isNotBlank()) { done = true; onCookie(c) }
+                                    // Même hôte seulement : l'utilisateur peut avoir saisi http:// alors que le serveur
+                                    // redirige vers https (reverse proxy), donc ni le schéma ni le port ne comptent.
+                                    if (u.host == base.host && !path.startsWith("/login") && path != "/callback") {
+                                        // Le cookie est lu pour l'adresse réellement atteinte (cookie « Secure » en https).
+                                        val c = cookies.getCookie(url).orEmpty()
+                                        if (c.isNotBlank()) {
+                                            done = true
+                                            val port = if (u.port > 0) ":${u.port}" else ""
+                                            onCookie(c, "${u.scheme}://${u.host}$port")
+                                        }
                                     }
                                 }
                             }

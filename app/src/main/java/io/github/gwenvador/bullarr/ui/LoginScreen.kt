@@ -149,16 +149,39 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
             )
         }
         if (mode == "oidc") {
-            OutlinedButton(enabled = url.isNotBlank(), onClick = { sso = true }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
+            val context = androidx.compose.ui.platform.LocalContext.current
+            // Navigateur du téléphone (passkeys possibles) : Bullarr renvoie ensuite vers bullarr://auth?code=…
+            Button(
+                enabled = url.isNotBlank() && !vm.ssoBusy,
+                onClick = {
+                    try {
+                        val base = BullarrApi.normalizeBaseUrl(url)
+                        vm.settings.lastUrl = url.trim()
+                        vm.ssoError = null
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(base.toString().trimEnd('/') + "/login/redirect?app=1")))
+                    } catch (e: Exception) { vm.ssoError = e.readable() }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (vm.ssoBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Outlined.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
-                Text(if (cookie.isBlank()) "Se connecter avec le SSO" else "Se reconnecter avec le SSO")
+                Text(if (vm.ssoBusy) "Connexion en cours…" else "Se connecter avec le SSO (navigateur)")
+            }
+            vm.ssoError?.let { ErrorCard(it) }
+            // Secours : fenêtre intégrée, sans passkey (code de connexion ou autre appareil seulement).
+            androidx.compose.material3.TextButton(enabled = url.isNotBlank(), onClick = { sso = true }) {
+                Text(if (cookie.isBlank()) "Dans l'app (sans passkey)" else "Se reconnecter dans l'app")
             }
             if (cookie.isNotBlank()) Text("Session SSO ouverte.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (sso) OidcLoginDialog(
             serverUrl = url,
-            onCookie = { cookie = it; sso = false; success = "Session SSO ouverte : appuyez sur Se connecter."; error = null },
+            onCookie = { c, origin ->
+                // Le serveur redirige peut-être vers https : on garde l'adresse réellement atteinte.
+                url = origin
+                cookie = c; sso = false; success = "Session SSO ouverte : appuyez sur Se connecter."; error = null },
             onCancel = { sso = false },
         )
 

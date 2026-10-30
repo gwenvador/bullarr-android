@@ -33,8 +33,9 @@ data class LibraryFilters(
     val volumes: Set<String> = emptySet(),
     val sizes: Set<String> = emptySet(),
     val votes: Set<String> = emptySet(),
+    val genres: Set<String> = emptySet(),
 ) {
-    val activeCount get() = listOf(types, origins, decades, updated, volumes, sizes, votes).count { it.isNotEmpty() }
+    val activeCount get() = listOf(types, origins, genres, decades, updated, volumes, sizes, votes).count { it.isNotEmpty() }
     val isEmpty get() = activeCount == 0
 
     fun matches(s: SeriesSummary, now: LocalDateTime = LocalDateTime.now()): Boolean =
@@ -42,11 +43,14 @@ data class LibraryFilters(
             (origins.isEmpty() || (s.origin ?: "Autre") in origins) &&
             (decades.isEmpty() || s.yearInt?.let { it / 10 * 10 in decades } == true) &&
             (updated.isEmpty() || updated.any { updatedMatches(it, s, now) }) &&
+            (genres.isEmpty() || s.genres.any { it in genres }) &&
             (votes.isEmpty() || votes.any { voteBucket(it, s.votes) }) &&
             (volumes.isEmpty() || volumes.any { volumeBucket(it, s.volumeCount) }) &&
             (sizes.isEmpty() || s.sizeBytes?.let { b -> sizes.any { sizeBucket(it, b) } } == true)
 }
 
+/** Origine Bédéthèque → type affiché. */
+val ORIGIN_NAMES = mapOf("Europe" to "BD", "USA" to "Comics", "Asie" to "Manga")
 val TYPE_LABELS = linkedMapOf("serie" to "Série", "oneshot" to "One-shot", "integrale" to "Intégrale")
 val UPDATED_LABELS = linkedMapOf("7" to "7 derniers jours", "30" to "30 derniers jours", "old" to "Plus ancien")
 val VOLUME_LABELS = linkedMapOf("0" to "Aucun", "1" to "1", "2-5" to "2 à 5", "6-10" to "6 à 10", "11-20" to "11 à 20", "21+" to "21 et plus")
@@ -86,6 +90,8 @@ fun sizeBucket(key: String, b: Long) = when (key) {
 fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, resultCount: Int, onChange: (LibraryFilters) -> Unit, onDismiss: () -> Unit) {
     val decades = all.mapNotNull { it.yearInt?.let { y -> y / 10 * 10 } }.distinct().sortedDescending()
     val origins = all.map { it.origin ?: "Autre" }.distinct().sorted()
+    // Genres les plus fréquents d'abord.
+    val genreCounts = all.flatMap { it.genres }.groupingBy { it }.eachCount().toList().sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first.lowercase() })
     val hasSizes = all.any { it.sizeBytes != null }
 
     fun <T> toggle(set: Set<T>, v: T) = if (v in set) set - v else set + v
@@ -99,7 +105,7 @@ fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, result
                     FilterChip(selected = k in selected, onClick = { set(toggle(selected, k)) }, label = {
                         if (flags && hasLogo(label.lowercase())) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Logo(label.lowercase(), label, 20.dp, tip = false)
-                            Text("${count(k)}")
+                            Text("$label · ${count(k)}")
                         } else Text("$label · ${count(k)}")
                     })
                 }
@@ -115,10 +121,14 @@ fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, result
                     TextButton(onClick = { onChange(LibraryFilters()) }, enabled = !filters.isEmpty) { Text("Réinitialiser") }
                 }
             }
-            item { Group("Type", TYPE_LABELS.toList(), filters.types, { k -> all.count { typeOf(it) == k } }) { onChange(filters.copy(types = it)) } }
+            // Type = BD / Comics / Manga (origine Bédéthèque) ; Genre = catégorie (humour, fantasy…) ; Format = série, one-shot, intégrale.
             if (origins.isNotEmpty()) item {
-                Group("Genre", origins.map { it to it }, filters.origins, { k -> all.count { (it.origin ?: "Autre") == k } }, flags = true) { onChange(filters.copy(origins = it)) }
+                Group("Type", origins.map { it to (ORIGIN_NAMES[it] ?: it) }, filters.origins, { k -> all.count { (it.origin ?: "Autre") == k } }, flags = true) { onChange(filters.copy(origins = it)) }
             }
+            if (genreCounts.isNotEmpty()) item {
+                Group("Genre", genreCounts.map { it.first to it.first }, filters.genres, { k -> all.count { s -> k in s.genres } }) { onChange(filters.copy(genres = it)) }
+            }
+            item { Group("Format", TYPE_LABELS.toList(), filters.types, { k -> all.count { typeOf(it) == k } }) { onChange(filters.copy(types = it)) } }
             item {
                 Group("Année de parution", decades.map { it to "${it}s" }, filters.decades, { k -> all.count { s -> s.yearInt?.let { it / 10 * 10 == k } == true } }) { onChange(filters.copy(decades = it)) }
             }

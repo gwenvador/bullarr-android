@@ -60,6 +60,10 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
         execute("POST", path, emptyMap(), body) as? JSONObject
             ?: throw ApiException("POST $path : réponse inattendue (un objet JSON était attendu).")
 
+    suspend fun putObject(path: String, body: JSONObject): JSONObject =
+        execute("PUT", path, emptyMap(), body) as? JSONObject
+            ?: throw ApiException("PUT $path : réponse inattendue (un objet JSON était attendu).")
+
     suspend fun deleteObject(path: String, body: JSONObject? = null): JSONObject =
         execute("DELETE", path, emptyMap(), body) as? JSONObject
             ?: throw ApiException("DELETE $path : réponse inattendue (un objet JSON était attendu).")
@@ -152,6 +156,32 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
         val req = Request.Builder().url(baseUrl.newBuilder().addPathSegments("api/libraries").build()).header("Accept", "application/json").build()
         client.newCall(req).execute().use { it.isSuccessful }
     } catch (_: IOException) { false }
+
+    /**
+     * Fin d'une connexion SSO faite dans le navigateur : Bullarr redirige vers bullarr://auth?code=…,
+     * et POST /api/auth/app-login échange ce code à usage unique contre une session (cookie).
+     */
+    suspend fun exchangeAppCode(code: String): String = withContext(Dispatchers.IO) {
+        val url = baseUrl.newBuilder().addPathSegments("api/auth/app-login").build()
+        val request = Request.Builder().url(url).header("Accept", "application/json")
+            .post(JSONObject().put("code", code).toString().toRequestBody(JSON)).build()
+        val resp = try {
+            client.newBuilder().followRedirects(false).build().newCall(request).execute()
+        } catch (e: IOException) { throw ApiException(networkMessage(e, url)) }
+        resp.use { r ->
+            val text = r.body?.string().orEmpty()
+            val detail = runCatching { extractError(JSONObject(text)) }.getOrNull()
+            when {
+                r.code == 404 -> throw ApiException(
+                    "POST /api/auth/app-login : route absente. Cette version de Bullarr ne gère pas encore la " +
+                        "connexion SSO depuis l'app (utilisez « Dans l'app », la clé API ou un compte).", 404)
+                !r.isSuccessful -> throw ApiException("POST /api/auth/app-login : ${detail ?: "erreur HTTP ${r.code}"}", r.code)
+            }
+            val cookie = r.headers("Set-Cookie").joinToString("; ") { it.substringBefore(';') }
+            if (cookie.isBlank()) throw ApiException("POST /api/auth/app-login : le serveur n'a renvoyé aucune session.")
+            cookie
+        }
+    }
 
     /** Ajoute l'authentification : clé API, sinon cookie de session (+ jeton CSRF hors lecture). */
     private fun applyAuth(builder: Request.Builder, method: String) {

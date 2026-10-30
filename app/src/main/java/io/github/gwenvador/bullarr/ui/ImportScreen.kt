@@ -24,20 +24,23 @@ import androidx.compose.ui.unit.dp
 import io.github.gwenvador.bullarr.data.ImportPendingCount
 import io.github.gwenvador.bullarr.data.ImportProgress
 import io.github.gwenvador.bullarr.data.formatDuration
+import io.github.gwenvador.bullarr.data.int
+import io.github.gwenvador.bullarr.data.objects
 import io.github.gwenvador.bullarr.data.parseImportProgress
 import io.github.gwenvador.bullarr.data.parsePendingCount
 import io.github.gwenvador.bullarr.data.readable
 
+/** État de l'import, sondé toutes les 5 s (lecture seule en base, sans scan disque). */
+class ImportInfo(val progress: ImportProgress?, val counts: ImportPendingCount?, val error: String?, val blocked: Map<Int, String> = emptyMap())
+
 @Composable
-fun ImportScreen(vm: AppViewModel) {
-    val api = vm.api ?: return
+fun rememberImportInfo(vm: AppViewModel): ImportInfo {
+    val api = vm.api
     var progress by remember { mutableStateOf<ImportProgress?>(null) }
     var counts by remember { mutableStateOf<ImportPendingCount?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-
-    // /import sonde aussi toutes les 5 s : lecture seule en base, sans scan disque.
     Polling(5000, api) {
-        try {
+        if (api != null) try {
             progress = parseImportProgress(api.getObject("api/import/progress"))
             counts = runCatching { parsePendingCount(api.getObject("api/import/pending-count")) }.getOrNull()
             error = null
@@ -45,14 +48,31 @@ fun ImportScreen(vm: AppViewModel) {
             error = e.readable()
         }
     }
+    // Téléchargements terminés que Bullarr ne peut pas importer seul (dossier d'images en vrac) : id de suivi -> explication.
+    var blocked by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    Polling(15_000, api) {
+        if (api != null) runCatching {
+            val st = api.getObject("api/import/state")
+            blocked = st.optJSONArray("incompatible_folders").objects().mapNotNull { f ->
+                val id = f.int("pack_download_id") ?: return@mapNotNull null
+                val ext = f.optJSONArray("sample_extensions")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                    .joinToString(", ") { it.trimStart('.').uppercase() }
+                id to "Non importable automatiquement : dossier de ${f.int("file_count") ?: 0} fichier(s)" +
+                    (if (ext.isNotBlank()) " $ext" else "") + " au lieu d'une archive CBZ/CBR/PDF. Sélectionnez-le puis « Importer » pour le convertir en CBZ."
+            }.toMap()
+        }
+    }
+    return ImportInfo(progress, counts, error, blocked)
+}
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Import", style = MaterialTheme.typography.headlineSmall) }
+/** Import en cours / fichiers en attente, intégrés en tête de l'Activité. */
+fun androidx.compose.foundation.lazy.LazyListScope.importItems(info: ImportInfo) {
+    val progress = info.progress; val counts = info.counts; val error = info.error
+    run {
         error?.let { item { ErrorCard(it) } }
         val p = progress
-        if (p == null && error == null) item { EmptyState("Chargement…") }
         if (p != null) {
-            item {
+            if (p.processingFile != null || p.claimedFiles.isNotEmpty() || p.paused) item {
                 val cs = MaterialTheme.colorScheme
                 Card(colors = CardDefaults.cardColors(containerColor = if (p.processingFile != null) cs.primaryContainer else cs.surfaceContainer)) {
                     Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -68,13 +88,13 @@ fun ImportScreen(vm: AppViewModel) {
                                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall)
                             }
                             p.claimedFiles.isNotEmpty() -> Text("Import en préparation", style = MaterialTheme.typography.titleMedium)
-                            else -> Text("Aucun import en cours", style = MaterialTheme.typography.titleMedium)
+                            else -> {}
                         }
                         if (p.paused) Tag("Import arrêté (mis en pause)", cs.tertiaryContainer, cs.onTertiaryContainer)
                     }
                 }
             }
-            counts?.let { c ->
+            counts?.takeIf { it.waitingFiles > 0 || it.awaitingDiscovery > 0 }?.let { c ->
                 item {
                     Text(
                         "${c.waitingFiles} fichier(s) en attente d'import · ${c.awaitingDiscovery} téléchargement(s) pas encore repéré(s) sur le disque",
@@ -92,5 +112,6 @@ fun ImportScreen(vm: AppViewModel) {
                 }
             }
         }
+
     }
 }
