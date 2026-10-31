@@ -155,8 +155,9 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var importing by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var assignVolume by remember { mutableStateOf<Int?>(null) }
-    fun assign(seriesId: Int, volume: Int?) {
-        val ids = selected.mapNotNull { trackers[it] }
+    var addingFor by remember { mutableStateOf<List<Int>>(emptyList()) }
+    fun assign(seriesId: Int, volume: Int?, only: List<Int>? = null) {
+        val ids = only ?: selected.mapNotNull { trackers[it] }
         selected = emptyList()
         scope.launch {
             var failed: String? = null
@@ -189,7 +190,10 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     if (confirmImport) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmImport = false },
         title = { Text(if (selected.count { it in trackers } > 1) "Importer ces albums ?" else "Importer cet album ?") },
-        text = { Text("Les fichiers JPG seront convertis en CBZ.") },
+        text = {
+            val toConvert = selected.any { k -> trackers[k]?.let { it in importInfo.blocked } == true }
+            Text(if (toConvert) "Les fichiers JPG seront convertis en CBZ." else "Les fichiers prêts seront importés dans leur série.")
+        },
         confirmButton = {
             TextButton(onClick = {
                 confirmImport = false
@@ -204,8 +208,8 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Annuler") } },
     )
-    if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { adding = true }, onPick = { sid, vol -> assign(sid, vol) })
-    if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName(selected.firstOrNull()?.let { names[it] }), onAdded = { sid, _ -> assign(sid, null) })
+    if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { addingFor = selected.mapNotNull { trackers[it] }; adding = true }, onPick = { sid, vol -> assign(sid, vol) })
+    if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName(selected.firstOrNull()?.let { names[it] }), onAdded = { sid, _ -> assign(sid, null, addingFor) })
     if (confirmBatch) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmBatch = false },
         title = { Text("Supprimer ${selected.size} téléchargement(s) ?") },

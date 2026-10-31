@@ -122,7 +122,9 @@ class DownloadController(private val scope: CoroutineScope, private val api: () 
     fun runQuick() {
         val item = quick ?: return
         val client = api() ?: return
-        sending = true
+        // Le dialogue se ferme tout de suite : l'ajout et l'envoi se poursuivent en arrière-plan.
+        quick = null
+        scope.launch { snackbar?.showSnackbar("« ${item.seriesTitle} » : " + (if (item.seriesId == null) "ajout de la série en cours…" else "envoi en cours…")) }
         scope.launch {
             try {
                 var seriesId = item.seriesId
@@ -132,19 +134,17 @@ class DownloadController(private val scope: CoroutineScope, private val api: () 
                         resolveSeries(client, item)
                     } catch (e: Exception) {
                         val queued = runCatching { queueReview(client, item, e.readable()) }.isSuccess
-                        quick = null
+                        snackbar?.currentSnackbarData?.dismiss()
                         snackbar?.showSnackbar("« ${item.seriesTitle} » : ${e.readable()}" + if (queued) " Envoyé en validation." else "")
                         return@launch
                     }
                 }
                 val dest = downloadRelease(client, item, seriesId)
-                quick = null
+                snackbar?.currentSnackbarData?.dismiss()
                 snackbar?.showSnackbar("« ${item.seriesTitle} » : " + (if (known) "" else "série ajoutée, ") + "téléchargement envoyé à $dest.")
             } catch (e: Exception) {
-                quick = null
+                snackbar?.currentSnackbarData?.dismiss()
                 snackbar?.showSnackbar("« ${item.seriesTitle} » : ${e.readable()}")
-            } finally {
-                sending = false
             }
         }
     }
@@ -225,18 +225,14 @@ class DownloadController(private val scope: CoroutineScope, private val api: () 
         val p = pending ?: return
         val target = p.chosen ?: return
         val client = api() ?: return
-        sending = true
+        pending = null
         scope.launch {
             try {
                 sendDownload(client, p.job, target, p.replace, qbCategory)
                 sent[p.job.key] = target.label
-                pending = null
                 snackbar?.showSnackbar("Envoyé à ${target.label} — suivez-le dans Activité.")
             } catch (e: Exception) {
-                pending = null
                 snackbar?.showSnackbar(e.readable())
-            } finally {
-                sending = false
             }
         }
     }

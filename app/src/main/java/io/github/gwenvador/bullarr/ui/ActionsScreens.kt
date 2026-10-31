@@ -99,6 +99,16 @@ private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit) {
 
 // --- Historique : /api/import/history, /api/missing-monitor/history, /api/actions/history ---
 
+/** Statuts bruts de l'API (anglais) → libellés français ; une valeur inconnue reste telle quelle. */
+private val STATUS_LABELS = mapOf(
+    "completed" to "terminé", "complete" to "terminé", "success" to "réussi", "succeeded" to "réussi",
+    "started" to "démarré", "running" to "en cours", "in_progress" to "en cours", "importing" to "import en cours",
+    "pending" to "en attente", "queued" to "en file", "failed" to "échec", "error" to "erreur",
+    "partial" to "partiel", "cancelled" to "annulé", "canceled" to "annulé", "skipped" to "ignoré",
+    "undone" to "annulé", "paused" to "en pause", "stopped" to "arrêté",
+)
+private fun statusFr(s: String?): String? = s?.let { STATUS_LABELS[it.lowercase().trim()] ?: it }
+
 private val ACTION_LABELS = mapOf(
     "search" to "Recherche", "rename" to "Renommage", "add_series" to "Série ajoutée",
     "missing_volume_match" to "Tome trouvé", "auto_acquire" to "Acquisition auto",
@@ -131,7 +141,7 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                             ).joinToString(" · ")
                             Row3(
                                 "Import", h.str("file_names") ?: "(aucun fichier)",
-                                listOfNotNull(if (h.str("operation_type") == "auto_import") "automatique" else "manuel", counts.ifBlank { null }, h.str("status")).joinToString(" · "),
+                                listOfNotNull(if (h.str("operation_type") == "auto_import") "automatique" else "manuel", counts.ifBlank { null }, statusFr(h.str("status"))).joinToString(" · "),
                                 h.str("created_at"), h.str("status") != "failed" && (h.int("files_failed") ?: 0) == 0, null, null,
                             )
                         }
@@ -142,7 +152,7 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                         api.getObject("api/missing-monitor/history").optJSONArray("history").objects().map { h ->
                             Row3(
                                 "Téléchargement", h.str("title") ?: "(sans titre)",
-                                listOfNotNull(h.str("series_title"), h.str("client"), h.str("message")).joinToString(" · "),
+                                listOfNotNull(h.str("series_title"), h.str("client"), statusFr(h.str("message"))).joinToString(" · "),
                                 h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"),
                             )
                         }
@@ -154,7 +164,7 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                             val type = h.str("action_type") ?: "action"
                             Row3(
                                 ACTION_LABELS[type] ?: type, h.str("series_title") ?: "(sans série)",
-                                listOfNotNull(h.str("detail"), h.str("error")).joinToString(" · ").ifBlank { null },
+                                listOfNotNull(statusFr(h.str("detail")), statusFr(h.str("error"))).joinToString(" · ").ifBlank { null },
                                 h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"),
                             )
                         }

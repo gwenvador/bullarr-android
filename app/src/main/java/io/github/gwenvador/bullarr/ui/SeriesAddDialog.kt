@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.lifecycle.viewModelScope
 import io.github.gwenvador.bullarr.data.int
 import io.github.gwenvador.bullarr.data.objects
 import io.github.gwenvador.bullarr.data.readable
@@ -68,15 +69,21 @@ fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: Strin
     fun add(r: JSONObject) {
         val url = r.str("url") ?: return
         val lib = library ?: run { error = "Aucune bibliothèque : créez-en une dans l'interface web."; return }
-        busy = true; error = null
-        scope.launch {
+        // Fermeture immédiate : l'ajout continue en arrière-plan (portée du ViewModel), résultat en toast.
+        val title = r.str("title") ?: ""
+        val app = context.applicationContext
+        onDismiss()
+        android.widget.Toast.makeText(app, "Ajout de « $title » en cours…", android.widget.Toast.LENGTH_SHORT).show()
+        vm.viewModelScope.launch {
             try {
                 val res = api.postObject("api/bedetheque/add-series", JSONObject().put("url", url).put("library_id", lib.id))
                 val id = res.int("series_id") ?: throw io.github.gwenvador.bullarr.data.ApiException("Ajout de la série impossible : la réponse ne contient pas d'identifiant.")
-                android.widget.Toast.makeText(context, "Série ajoutée : ${r.str("title") ?: ""}", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(app, "Série ajoutée : $title", android.widget.Toast.LENGTH_SHORT).show()
                 vm.loadLibrary(force = true)
-                onDismiss(); onAdded(id, r.str("title") ?: "")
-            } catch (e: Exception) { error = e.readable(); busy = false }
+                onAdded(id, title)
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(app, "Ajout de « $title » impossible : ${e.readable()}", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 
