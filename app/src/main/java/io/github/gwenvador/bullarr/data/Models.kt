@@ -232,6 +232,7 @@ data class VolumeRow(
     val isIntegral: Boolean,
     val isHs: Boolean,
     val isEpisode: Boolean,
+    val isSpecial: Boolean,
     /** ComicInfo du tome (titre, résumé, auteurs, éditeur, note…), tel que Bullarr le renvoie. */
     val comicInfo: JSONObject?,
     val isbn: String?,
@@ -254,6 +255,11 @@ data class SeriesDetail(
     val monitored: Boolean,
     val completeReason: String?,
     val isOneshot: Boolean,
+    val bedethequeUrl: String?,
+    val komgaUrl: String?,
+    val ebdzUrl: String?,
+    /** Fiche Bédéthèque de chaque auteur (nom → URL) : ouvre ses autres séries. */
+    val authorLinks: Map<String, String>,
     val volumes: List<VolumeRow>,
 )
 
@@ -286,6 +292,7 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
             isIntegral = v.bool("is_integral") == true,
             isHs = v.bool("is_hs") == true,
             isEpisode = v.bool("is_episode") == true,
+            isSpecial = v.bool("is_special") == true,
             comicInfo = ci,
             isbn = v.str("isbn"),
             author = v.str("author"),
@@ -310,6 +317,12 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
         monitored = o.bool("monitored") == true,
         completeReason = o.str("bedetheque_complete_reason"),
         isOneshot = o.bool("is_oneshot") == true,
+        bedethequeUrl = bd.str("url") ?: o.str("bedetheque_url"),
+        komgaUrl = o.optJSONObject("komga")?.str("url"),
+        ebdzUrl = o.optJSONObject("ebdz")?.str("thread_url"),
+        authorLinks = bd.optJSONObject("author_links").let { links ->
+            buildMap { links?.keys()?.forEach { name -> put(name, links.optString(name)) } }.filterValues { it.isNotBlank() }
+        },
         volumes = volumes,
     )
 }
@@ -384,6 +397,12 @@ data class SearchResult(
     val sourceLink: String?,
     val raw: JSONObject,
 ) {
+    /** Seeders (Prowlarr) : tri et départage. */
+    val seeders: Int? get() = raw.int("seeders")
+    /** Date de publication (Prowlarr, VK), au format AAAA-MM-JJ. */
+    val date: String? get() = (raw.str("publish_date") ?: raw.str("date"))?.take(10)?.ifBlank { null }
+    /** Format lu dans le nom (CBZ, CBR, PDF, EPUB) : filtre. */
+    val format: String? get() = Regex("\\b(cbz|cbr|pdf|epub)\\b", RegexOption.IGNORE_CASE).find(name)?.value?.uppercase()
     /** Lien sur lequel le serveur reconnaît un ajout (torrent, ed2k, VK…). */
     val downloadLink: String? get() = raw.str("download_url") ?: raw.str("link")
 }

@@ -6,6 +6,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.SolidColor
+import io.github.gwenvador.bullarr.data.normalize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -107,6 +117,13 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     // POST /api/bedetheque/origins, par lots de 100, en redemandant tant que le serveur lit des pages.
     val genres = remember { mutableStateMapOf<String, String?>() }
     var genreFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    // Pays masqués par défaut ; « Tous » les replie. La recherche filtre titre, sous-titre et série.
+    var countriesOpen by rememberSaveable { mutableStateOf(false) }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Ouvrir la recherche place le curseur dans le champ, sans second appui.
+    LaunchedEffect(searchOpen) { if (searchOpen) searchFocus.requestFocus() }
     val wantedUrls = remember(feeds.toMap()) { feeds.values.flatten().mapNotNull { it.bedethequeUrl }.distinct() }
     LaunchedEffect(wantedUrls) {
         var missing = wantedUrls.filter { it !in genres }
@@ -125,9 +142,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     }
 
     val shownTypes = if (tab == 0) NewsType.entries else listOf(NewsType.entries[tab - 1])
-    val items = remember(tab, feeds.toMap(), genreFilter, genres.toMap()) {
+    val items = remember(tab, feeds.toMap(), genreFilter, genres.toMap(), query) {
+        val q = normalize(query).trim()
         shownTypes.flatMap { feeds[it].orEmpty() }
             .filter { genreFilter == null || it.bedethequeUrl?.let { u -> genres[u] } == genreFilter }
+            .filter { q.isEmpty() || normalize(listOfNotNull(it.title, it.subtitle, it.seriesTitle).joinToString(" ")).contains(q) }
             .let { list -> if (tab == 0) list.sortedByDescending { it.date ?: "" } else list }
     }
 
@@ -144,16 +163,53 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 })
             }
         }
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(null to "Tous", "bd" to "BD", "comics" to "Comics", "manga" to "Manga").forEach { (k, l) ->
-                // Drapeau du genre (BD = France, Comics = USA, Manga = Japon), nombre d'entrées à côté.
-                val n = if (k == null) null else feeds.values.flatten().count { it.bedethequeUrl?.let { u -> genres[u] } == k }
-                FilterChip(selected = genreFilter == k, onClick = { genreFilter = k }, label = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (k == null) Text(l) else Logo(k, l, 20.dp, tip = false)
-                        if (n != null && n > 0) Text("$n")
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (countriesOpen && !searchOpen) {
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(null to "Genre", "bd" to "BD", "comics" to "Comics", "manga" to "Manga").forEach { (k, l) ->
+                        // Drapeau du genre (BD = France, Comics = USA, Manga = Japon), nombre d'entrées à côté.
+                        val n = if (k == null) null else feeds.values.flatten().count { it.bedethequeUrl?.let { u -> genres[u] } == k }
+                        FilterChip(selected = genreFilter == k, onClick = { genreFilter = k; if (k == null) countriesOpen = false }, label = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (k == null) Text(l) else Logo(k, l, 20.dp, tip = false)
+                                if (n != null && n > 0) Text("$n")
+                            }
+                        })
                     }
+                }
+            } else {
+                // Pendant une recherche, un appui sur « Genre » ferme la recherche.
+                FilterChip(selected = genreFilter != null, onClick = { if (searchOpen) { searchOpen = false; query = "" } else countriesOpen = true }, label = {
+                    if (genreFilter == null) Text("Genre") else Logo(genreFilter, genreFilter.orEmpty(), 20.dp, tip = false)
                 })
+                if (searchOpen) BasicTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    // Même hauteur que les chips (32 dp) : le champ Material fait 56 dp de haut minimum.
+                    decorationBox = { inner ->
+                        Box(
+                            Modifier.fillMaxWidth().height(32.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (query.isEmpty()) Text("Titre ou série", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            inner()
+                        }
+                    },
+                    modifier = Modifier.weight(1f).focusRequester(searchFocus),
+                )
+                else Spacer(Modifier.weight(1f))
+            }
+            IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
+                Icon(
+                    Icons.Outlined.Search, contentDescription = "Rechercher dans les nouveautés",
+                    tint = if (searchOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         if (loading && feeds.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())

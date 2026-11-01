@@ -188,8 +188,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
     var query by mutableStateOf("")
     var filters by mutableStateOf(LibraryFilters())
-    var sort by mutableStateOf(LibrarySort.Title)
-    var sortDesc by mutableStateOf(false)
+    /** Séries dans l'ordre affiché par la bibliothèque : le glissement passe à la voisine. */
+    var visibleSeries: List<SeriesSummary> = emptyList()
+    private val libPrefs = app.getSharedPreferences("library", android.content.Context.MODE_PRIVATE)
+    /** Tri de la bibliothèque, conservé entre les ouvertures (par défaut : date, plus récent d'abord). */
+    var sort by mutableStateOf(LibrarySort.entries.firstOrNull { it.name == libPrefs.getString("sort", null) } ?: LibrarySort.Date)
+        private set
+    var sortDesc by mutableStateOf(libPrefs.getBoolean("sortDesc", LibrarySort.Date.defaultDesc))
+        private set
+    fun setSort(o: LibrarySort, desc: Boolean) {
+        sort = o; sortDesc = desc
+        libPrefs.edit().putString("sort", o.name).putBoolean("sortDesc", desc).apply()
+    }
 
     fun loadLibrary(force: Boolean = false, library: Library? = selectedLibrary) {
         val client = api ?: return

@@ -22,8 +22,9 @@ object CoverLoader {
 
     fun cached(url: String): Bitmap? = cache.get(url)
 
-    suspend fun load(url: String, targetWidthPx: Int): Bitmap? {
-        cache.get(url)?.let { return it }
+    /** [key] sépare une version agrandie de la miniature mise en cache sous [url]. */
+    suspend fun load(url: String, targetWidthPx: Int, key: String = url): Bitmap? {
+        cache.get(key)?.let { return it }
         synchronized(failed) { if (url in failed) return null }
         return gate.withPermit {
             withContext(Dispatchers.IO) {
@@ -36,7 +37,7 @@ object CoverLoader {
                     var sample = 1
                     while (bounds.outWidth / (sample * 2) >= targetWidthPx) sample *= 2
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-                    bmp?.also { cache.put(url, it) }
+                    bmp?.also { cache.put(key, it) }
                 } catch (_: Exception) {
                     null
                 }

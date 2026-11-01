@@ -71,6 +71,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
         val terms = normalize(q).split(' ').filter { it.isNotBlank() }
         vm.sort.sorted(vm.series.filter { s -> (terms.isEmpty() || terms.all { it in s.searchKey }) && filters.matches(s) }, vm.sortDesc)
     }
+    androidx.compose.runtime.SideEffect { vm.visibleSeries = filtered }
     var sortMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
     // Sélection multiple (appui long sur une série) : MAJ Bédéthèque, scan, suppression.
     var selected by rememberSaveable { androidx.compose.runtime.mutableStateOf(emptyList<Int>()) }
@@ -122,7 +123,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                                 },
                                 // Même critère : inverse l'ordre ; sinon ordre par défaut du critère.
                                 onClick = {
-                                    if (vm.sort == o) vm.sortDesc = !vm.sortDesc else { vm.sort = o; vm.sortDesc = o.defaultDesc }
+                                    if (vm.sort == o) vm.setSort(o, !vm.sortDesc) else vm.setSort(o, o.defaultDesc)
                                     sortMenu = false
                                 },
                             )

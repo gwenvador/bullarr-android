@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.gwenvador.bullarr.data.SeriesDetail
 import io.github.gwenvador.bullarr.data.VolumeRow
 import io.github.gwenvador.bullarr.data.readable
 import io.github.gwenvador.bullarr.data.str
@@ -38,6 +39,18 @@ object ItemActions {
         api.postObject("api/bedetheque/update-metadata/volume/$id", JSONObject())
     }
     suspend fun refreshVolume(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int) { api.postObject("api/volumes/$id/refresh", JSONObject()) }
+    /** Recherches d'un album dans les magasins (même liste que le site). */
+    fun shopLinks(query: String): List<Pair<String, String>> {
+        val q = java.net.URLEncoder.encode(query, "UTF-8")
+        return listOf(
+            "Fnac" to "https://www.fnac.com/SearchResult/ResultList.aspx?Search=$q",
+            "Amazon" to "https://www.amazon.fr/s?k=$q&i=stripbooks",
+            "BDfugue" to "https://www.bdfugue.com/catalogsearch/result/?q=$q",
+        )
+    }
+    suspend fun editSeries(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, fields: Map<String, String>) {
+        api.putObject("api/series/$id/manual-metadata", JSONObject(fields))
+    }
     suspend fun deleteVolume(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int) { api.deleteObject("api/volumes/$id") }
     suspend fun editVolume(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, fields: Map<String, String>) {
         api.putObject("api/volumes/$id/manual-metadata", JSONObject(fields))
@@ -93,6 +106,41 @@ fun EditVolumeDialog(v: VolumeRow, onDismiss: () -> Unit, onSave: (Map<String, S
             }
         },
         confirmButton = { TextButton(onClick = { onDismiss(); onSave(values.mapValues { it.value.value }) }) { Text("Enregistrer") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
+}
+
+/** Édition des métadonnées de série : seuls les champs modifiés sont envoyés (un champ vide = effacé). */
+@Composable
+fun SeriesEditDialog(d: SeriesDetail, onDismiss: () -> Unit, onSave: (Map<String, String>) -> Unit) {
+    val years = d.years?.split(" – ")
+    val initial = mapOf(
+        "title" to d.title, "summary" to (d.summary ?: ""), "genre" to (d.genre ?: ""), "status" to (d.status ?: ""),
+        "author" to (d.authors ?: ""), "year_start" to (years?.getOrNull(0) ?: ""), "year_end" to (years?.getOrNull(1) ?: ""),
+    )
+    val labels = linkedMapOf(
+        "title" to "Titre", "summary" to "Résumé", "genre" to "Genre", "status" to "Statut",
+        "author" to "Auteur(s)", "year_start" to "Année de début", "year_end" to "Année de fin",
+    )
+    val values = remember { initial.mapValues { androidx.compose.runtime.mutableStateOf(it.value) } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Éditer la série") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                labels.forEach { (k, label) ->
+                    var value by values.getValue(k)
+                    OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(label) }, singleLine = k != "summary", modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val changed = values.filter { (k, st) -> st.value != initial.getValue(k) }.mapValues { it.value.value.trim() }
+                onDismiss()
+                if (changed.isNotEmpty()) onSave(changed)
+            }) { Text("Enregistrer") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
 }

@@ -3,6 +3,15 @@ package io.github.gwenvador.bullarr.ui
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.DriveFileMove
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.MoveToInbox
@@ -26,6 +35,8 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Search
 import io.github.gwenvador.bullarr.ui.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import io.github.gwenvador.bullarr.data.BullarrApi
+import androidx.compose.material3.ExperimentalMaterial3Api
 import io.github.gwenvador.bullarr.ui.Icon
 import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -63,6 +74,33 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
+/** Petite icône du type d'événement (import, téléchargement, suppression…). */
+private fun kindIcon(kind: String) = when (kind) {
+    "Import" -> Icons.Outlined.MoveToInbox
+    "Téléchargement" -> Icons.Outlined.Download
+    "Recherche" -> Icons.Outlined.Search
+    "Renommage" -> Icons.Outlined.Edit
+    "Série ajoutée" -> Icons.Outlined.CollectionsBookmark
+    "Tome trouvé" -> Icons.Outlined.TaskAlt
+    "Acquisition auto" -> Icons.Outlined.Bolt
+    "Tome supprimé" -> Icons.Outlined.Delete
+    "Tome déplacé" -> Icons.Outlined.DriveFileMove
+    "Conversion" -> Icons.Outlined.Autorenew
+    else -> Icons.Outlined.Apps
+}
+
+/** Étiquette de type : icône + texte. */
+@Composable
+private fun KindTag(kind: String) {
+    val cs = MaterialTheme.colorScheme
+    Surface(color = cs.surfaceVariant, contentColor = cs.onSurfaceVariant, shape = RoundedCornerShape(6.dp)) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(kindIcon(kind), contentDescription = null, modifier = Modifier.size(12.dp))
+            Text(kind, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
 /** Ligne générique : titre, détail, date, état ; un appui ouvre la série si elle est connue. */
 private data class Row3(
     val kind: String,
@@ -72,6 +110,7 @@ private data class Row3(
     val ok: Boolean?,
     val seriesId: Int?,
     val seriesTitle: String?,
+    val client: String? = null,
 )
 
 @Composable
@@ -84,7 +123,8 @@ private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Tag(r.kind, cs.surfaceVariant, cs.onSurfaceVariant)
+            KindTag(r.kind)
+            logoKey(r.client)?.let { Logo(it, r.client ?: it, 16.dp, tip = false) }
             when (r.ok) {
                 true -> IconTag(Icons.Outlined.CheckCircle, "OK", cs.secondary)
                 false -> IconTag(Icons.Outlined.ErrorOutline, "Échec", cs.error)
@@ -94,6 +134,82 @@ private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit) {
         }
         Text(r.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 3, overflow = TextOverflow.Ellipsis)
         r.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis) }
+    }
+}
+
+/** Imports, téléchargements et actions réunis ; avec [seriesId], seulement ceux d'une série. */
+private suspend fun loadHistory(api: BullarrApi, seriesId: Int?, errors: MutableMap<String, String>): List<Row3> {
+    val q = seriesId?.let { mapOf("limit" to "100", "series_id" to "$it") } ?: emptyMap()
+    suspend fun part(name: String, block: suspend () -> List<Row3>) =
+        try { block() } catch (e: Exception) { errors[name] = e.readable(); emptyList() }
+    return coroutineScope {
+        listOf(
+            async {
+                part("Imports") {
+                    api.getObject("api/import/history", q).optJSONArray("history").objects().map { h ->
+                        val counts = listOfNotNull(
+                            h.int("files_imported")?.takeIf { it > 0 }?.let { "$it importé(s)" },
+                            h.int("files_replaced")?.takeIf { it > 0 }?.let { "$it remplacé(s)" },
+                            h.int("files_skipped")?.takeIf { it > 0 }?.let { "$it ignoré(s)" },
+                            h.int("files_failed")?.takeIf { it > 0 }?.let { "$it en échec" },
+                        ).joinToString(" · ")
+                        Row3(
+                            "Import", h.str("file_names") ?: "(aucun fichier)",
+                            listOfNotNull(if (h.str("operation_type") == "auto_import") "automatique" else "manuel", counts.ifBlank { null }, statusFr(h.str("status"))).joinToString(" · "),
+                            h.str("created_at"), h.str("status") != "failed" && (h.int("files_failed") ?: 0) == 0, null, null,
+                        )
+                    }
+                }
+            },
+            async {
+                part("Téléchargements") {
+                    api.getObject("api/missing-monitor/history", q).optJSONArray("history").objects().map { h ->
+                        Row3(
+                            "Téléchargement", h.str("title") ?: "(sans titre)",
+                            listOfNotNull(h.str("series_title"), h.str("client"), statusFr(h.str("message"))).joinToString(" · "),
+                            h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"), h.str("client"),
+                        )
+                    }
+                }
+            },
+            async {
+                part("Actions") {
+                    api.getObject("api/actions/history", q).optJSONArray("history").objects().map { h ->
+                        val type = h.str("action_type") ?: "action"
+                        Row3(
+                            ACTION_LABELS[type] ?: type, h.str("series_title") ?: "(sans série)",
+                            listOfNotNull(statusFr(h.str("detail")), statusFr(h.str("error"))).joinToString(" · ").ifBlank { null },
+                            h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"),
+                        )
+                    }
+                }
+            },
+        ).awaitAll().flatten().sortedByDescending { it.date ?: "" }
+    }
+}
+
+/** Historique d'une série (imports, téléchargements, actions), ouvert depuis son menu. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SeriesHistorySheet(api: BullarrApi, seriesId: Int, title: String, onDismiss: () -> Unit) {
+    var rows by remember(seriesId) { mutableStateOf<List<Row3>?>(null) }
+    val errors = remember(seriesId) { mutableStateMapOf<String, String>() }
+    LaunchedEffect(seriesId) { rows = loadHistory(api, seriesId, errors) }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        val list = rows
+        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
+            item {
+                Text("Historique", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            errors.forEach { (k, v) -> item(key = "e-$k") { ErrorCard("$k : $v", Modifier.padding(top = 8.dp)) } }
+            if (list == null && errors.isEmpty()) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp)) }
+            if (list != null && list.isEmpty()) item { EmptyState("Rien dans l'historique de cette série") }
+            list?.let { items(it) { r ->
+                SimpleRow(r, { _, _ -> })
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            } }
+        }
     }
 }
 
@@ -126,52 +242,7 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
 
     suspend fun load() {
         loading = true; errors.clear()
-        suspend fun part(name: String, block: suspend () -> List<Row3>) =
-            try { block() } catch (e: Exception) { errors[name] = e.readable(); emptyList() }
-        rows = coroutineScope {
-            listOf(
-                async {
-                    part("Imports") {
-                        api.getObject("api/import/history").optJSONArray("history").objects().map { h ->
-                            val counts = listOfNotNull(
-                                h.int("files_imported")?.takeIf { it > 0 }?.let { "$it importé(s)" },
-                                h.int("files_replaced")?.takeIf { it > 0 }?.let { "$it remplacé(s)" },
-                                h.int("files_skipped")?.takeIf { it > 0 }?.let { "$it ignoré(s)" },
-                                h.int("files_failed")?.takeIf { it > 0 }?.let { "$it en échec" },
-                            ).joinToString(" · ")
-                            Row3(
-                                "Import", h.str("file_names") ?: "(aucun fichier)",
-                                listOfNotNull(if (h.str("operation_type") == "auto_import") "automatique" else "manuel", counts.ifBlank { null }, statusFr(h.str("status"))).joinToString(" · "),
-                                h.str("created_at"), h.str("status") != "failed" && (h.int("files_failed") ?: 0) == 0, null, null,
-                            )
-                        }
-                    }
-                },
-                async {
-                    part("Téléchargements") {
-                        api.getObject("api/missing-monitor/history").optJSONArray("history").objects().map { h ->
-                            Row3(
-                                "Téléchargement", h.str("title") ?: "(sans titre)",
-                                listOfNotNull(h.str("series_title"), h.str("client"), statusFr(h.str("message"))).joinToString(" · "),
-                                h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"),
-                            )
-                        }
-                    }
-                },
-                async {
-                    part("Actions") {
-                        api.getObject("api/actions/history").optJSONArray("history").objects().map { h ->
-                            val type = h.str("action_type") ?: "action"
-                            Row3(
-                                ACTION_LABELS[type] ?: type, h.str("series_title") ?: "(sans série)",
-                                listOfNotNull(statusFr(h.str("detail")), statusFr(h.str("error"))).joinToString(" · ").ifBlank { null },
-                                h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"),
-                            )
-                        }
-                    }
-                },
-            ).awaitAll().flatten().sortedByDescending { it.date ?: "" }
-        }
+        rows = loadHistory(api, null, errors)
         loading = false
     }
     LaunchedEffect(api) { if (rows == null) load() }
@@ -185,7 +256,12 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
             if (kinds.size > 1) item {
                 androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(kinds, key = { it.key }) { (k, n) ->
-                        FilterChip(selected = kind == k, onClick = { kind = if (kind == k) null else k }, label = { Text("$k · $n", maxLines = 1) })
+                        FilterChip(selected = kind == k, onClick = { kind = if (kind == k) null else k }, label = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(kindIcon(k), contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("$k · $n", maxLines = 1)
+                            }
+                        })
                     }
                 }
             }

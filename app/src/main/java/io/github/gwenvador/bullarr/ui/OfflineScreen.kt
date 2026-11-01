@@ -302,7 +302,7 @@ private fun Thumb(file: File) {
 
 /** Bouton d'état hors ligne d'un tome, partagé par la fiche du tome et le one-shot. */
 @Composable
-fun OfflineButton(vm: AppViewModel, volumeId: Int, title: String, modifier: Modifier = Modifier) {
+fun OfflineButton(vm: AppViewModel, volumeId: Int, title: String, modifier: Modifier = Modifier, iconOnly: Boolean = false) {
     val mgr = vm.offline
     val progress = mgr.active[volumeId]
     val done = mgr.isDownloaded(volumeId)
@@ -317,6 +317,12 @@ fun OfflineButton(vm: AppViewModel, volumeId: Int, title: String, modifier: Modi
                 else Text(if (progress.total > 0) "Téléchargement ${progress.done}/${progress.total} · Arrêter" else "Préparation… · Arrêter")
             }
             progress.error?.let { ErrorCard(it) }
+        }
+        iconOnly && done -> WithTip("Supprimer la copie hors ligne") {
+            androidx.compose.material3.FilledTonalIconButton(onClick = { confirm = true }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer la copie hors ligne") }
+        }
+        iconOnly -> WithTip("Télécharger hors ligne") {
+            androidx.compose.material3.FilledTonalIconButton(onClick = { mgr.start(volumeId, title) }) { Icon(Icons.Outlined.DownloadForOffline, contentDescription = "Télécharger hors ligne") }
         }
         done -> androidx.compose.material3.OutlinedButton(onClick = { confirm = true }, modifier = modifier) {
             Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.padding(end = 6.dp))

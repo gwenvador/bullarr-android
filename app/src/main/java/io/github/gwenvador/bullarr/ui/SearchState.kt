@@ -56,10 +56,14 @@ class SearchState(private val scope: CoroutineScope, private val api: () -> Bull
         val client = api() ?: return
         val t = title.trim()
         if (t.isEmpty()) return
+        // Un autre titre que la série visée : nouvelle recherche, plus rattachée à cette série.
+        context?.let { if (t != it.seriesTitle) context = null }
         jobs.forEach { it.cancel() }
         sources.clear()
         val vol = volume.trim().toIntOrNull()
         val ctx = context
+        // Un numéro de tome visé ne garde que les résultats de ce tome (pas une intégrale, un HS ou un épisode).
+        val onlyThisTome = vol != null && (ctx == null || (!ctx.isIntegral && !ctx.isHs && !ctx.isEpisode))
         lastQuery = listOfNotNull(t, vol?.let { "tome $it" }).joinToString(" · ")
         jobs = SEARCH_SOURCES.keys.filter { enabledSources[it] == true }.map { source ->
             sources[source] = SourceState.Loading
@@ -74,7 +78,11 @@ class SearchState(private val scope: CoroutineScope, private val api: () -> Bull
                 }
                 sources[source] = try {
                     // Tomes confirmés d'abord ; l'ordre du serveur est gardé dans chaque groupe.
-                    SourceState.Done(parseSearchResults(client.postObject("api/missing-monitor/search", body)).sortedBy { it.unconfirmed != null })
+                    SourceState.Done(
+                        parseSearchResults(client.postObject("api/missing-monitor/search", body))
+                            .filter { !onlyThisTome || it.volumeNumber == vol }
+                            .sortedBy { it.unconfirmed != null },
+                    )
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     SourceState.Failed(e.readable())
