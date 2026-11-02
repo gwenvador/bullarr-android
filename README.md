@@ -6,6 +6,7 @@ Interface en français, thème clair ou sombre selon le réglage du téléphone.
 
 <p align="center">
   <a href="https://gwenvador.github.io/bullarr-android/repo/"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/fdroid.svg" alt="Installer Bullarr avec F-Droid" width="30%"></a>
+  <a href="https://github.com/gwenvador/bullarr-android/releases/latest"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/signed-apk.svg" alt="Télécharger le dernier APK signé de Bullarr" width="30%"></a>
 </p>
 
 ## Installation
@@ -48,6 +49,21 @@ Ou ouvrez ce lien depuis un téléphone qui a F-Droid :
 Empreinte SHA-256 de la clé de signature du dépôt, à vérifier si F-Droid la demande :
 
     65 2E 77 16 8C 22 C5 6A 08 E2 77 B0 0A C1 D5 B7 F0 95 B1 F8 FE 65 22 A1 50 8D 14 50 BA 80 38 92
+
+### Vérifier l'APK
+
+Les APK à partir de la 1.4.1 sont signés avec la clé de signature du projet (`CN=Bullarr`). Les versions précédentes (1.4 et avant) étaient signées avec le certificat de debug Android, et ne peuvent pas être mises à jour par-dessus. Pour vérifier un fichier téléchargé :
+
+SHA-256 de `bullarr-android-1.4.1.apk` :
+
+    a211a01a7a2e38b56a64b9b462e0fb509846d1a551f3d5129e7edebb1ef71fff
+
+SHA-256 du certificat de signature (à comparer à `apksigner verify --print-certs`) :
+
+    cef915fef814abb006e1f6ae31efbc778a3cd12cc548226662e73c987e15da30
+
+    sha256sum bullarr-android-1.4.1.apk
+    apksigner verify --print-certs bullarr-android-1.4.1.apk
 
 ## Navigation
 

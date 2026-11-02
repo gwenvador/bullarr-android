@@ -1,6 +1,13 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Clé de signature du projet : fichier pointé par la propriété Gradle bullarrSigningFile (hors du dépôt).
+val bullarrSigning = (project.findProperty("bullarrSigningFile") as String?)?.let { path ->
+    Properties().apply { file(path).inputStream().use { load(it) } }
 }
 
 android {
@@ -11,14 +18,24 @@ android {
         applicationId = "io.github.gwenvador.bullarr"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.4"
+        versionCode = 7
+        versionName = "1.4.1"
+    }
+
+    signingConfigs {
+        if (bullarrSigning != null) create("release") {
+            storeFile = file(bullarrSigning.getProperty("bullarrStoreFile"))
+            storePassword = bullarrSigning.getProperty("bullarrStorePassword")
+            keyAlias = bullarrSigning.getProperty("bullarrKeyAlias")
+            keyPassword = bullarrSigning.getProperty("bullarrKeyPassword")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            // Sans clé configurée, la release reste non signée : jamais de signature silencieuse avec la clé de debug.
+            signingConfig = if (bullarrSigning != null) signingConfigs.getByName("release") else null
         }
     }
 
