@@ -4,6 +4,10 @@ Application Android (Kotlin, Jetpack Compose) qui pilote Bullarr à travers son 
 L'icône reprend le logo de Bullarr (`static/img/bullarr-icon.png`).
 Interface en français, thème clair ou sombre selon le réglage du téléphone.
 
+<p align="center">
+  <a href="https://gwenvador.github.io/bullarr-android/repo/"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/fdroid.svg" alt="Installer Bullarr avec F-Droid" width="30%"></a>
+</p>
+
 ## Installation
 
 1. Téléchargez `bullarr-android-<version>.apk` depuis les
