@@ -13,6 +13,8 @@ import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -101,6 +103,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 IconButton(onClick = { batch("Scan lancé", true) { a, id -> ItemActions.scanSeries(a, id) } }) { Icon(Icons.Outlined.Refresh, contentDescription = "Scanner les fichiers") }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error) }
             } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(onClick = { addSeries = true }) { Icon(Icons.Outlined.Add, contentDescription = "Ajouter une série") }
                 CompactSearchField(
                     value = q, onValueChange = { vm.query = it },
                     placeholder = "Rechercher une série, un auteur…",
@@ -130,7 +133,6 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                         }
                     }
                 }
-                IconButton(onClick = { addSeries = true }) { Icon(Icons.Outlined.Add, contentDescription = "Ajouter une série") }
                 // Bouton de filtres, avec le nombre de groupes actifs.
                 androidx.compose.material3.BadgedBox(badge = {
                     if (filters.activeCount > 0) androidx.compose.material3.Badge { Text("${filters.activeCount}") }
@@ -243,6 +245,8 @@ private fun SeriesRow(s: SeriesSummary, cover: String?, selected: Boolean, offli
                 IconTag(if (s.isOneshot) Icons.Outlined.Book else Icons.Outlined.CollectionsBookmark, count, cs.onSurfaceVariant, owned)
                 if (offline > 0) IconTag(Icons.Outlined.OfflinePin, "$offline album(s) hors ligne", cs.primary, "$offline")
                 if (s.missingCount > 0) IconTag(Icons.Outlined.ReportProblem, "${s.missingCount} manquant(s)", cs.tertiary, "${s.missingCount}")
+                if (s.isFavorite) IconTag(Icons.Filled.Star, "Favori", cs.secondary)
+                if (s.toReadLater) IconTag(Icons.Filled.Bookmark, "À lire plus tard", cs.secondary)
             }
         }
         if (selected) Icon(Icons.Outlined.CheckCircle, contentDescription = "Sélectionnée", tint = MaterialTheme.colorScheme.primary)

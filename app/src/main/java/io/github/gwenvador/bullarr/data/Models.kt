@@ -172,6 +172,11 @@ data class SeriesSummary(
     val votes: Int = 0,
     /** Genres (humour, fantasy…) : `local_genre`, plusieurs valeurs séparées par des virgules. */
     val genres: List<String> = emptyList(),
+    /** Tags libres de la série (minuscules, tirets), comme sur le site. */
+    val tags: List<String> = emptyList(),
+    /** Listes personnelles : « à lire plus tard » et « favori ». */
+    val toReadLater: Boolean = false,
+    val isFavorite: Boolean = false,
 )
 
 /** Anciens (Europe, USA, Asie) et nouveaux (Franco-Belge, Comics, Manga) libellés d'origine de Bédéthèque → un seul jeu. */
@@ -186,9 +191,14 @@ fun canonicalOrigin(raw: String?): String? = when (raw?.trim()?.lowercase()) {
 fun coverOf(o: JSONObject): String? =
     o.str("local_cover_path") ?: o.str("bedetheque_cover_path") ?: o.str("komga_cover_path")
 
+/** Tableau JSON de chaînes (tags) ; absent ou vide donne une liste vide. */
+fun JSONObject.strings(key: String): List<String> =
+    optJSONArray(key)?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }.orEmpty()
+
 fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
     val title = it.str("title") ?: "(sans titre)"
     val author = it.str("local_author")
+    val tags = it.strings("tags")
     SeriesSummary(
         id = it.int("id") ?: -1,
         title = title,
@@ -199,7 +209,8 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         totalKnown = it.int("bedetheque_total_volumes"),
         missingCount = it.optJSONArray("missing_volumes")?.length() ?: 0,
         isOneshot = it.bool("is_oneshot") == true,
-        searchKey = normalize("$title ${author ?: ""} ${it.str("universe_name") ?: ""}"),
+        // Un tag se cherche avec ou sans tiret : « chat-surdoue » trouve aussi « chat surdoué ».
+        searchKey = normalize("$title ${author ?: ""} ${it.str("universe_name") ?: ""} ${tags.joinToString(" ") { t -> "$t ${t.replace('-', ' ')}" }}"),
         isIntegral = it.bool("oneshot_is_integral") == true,
         origin = canonicalOrigin(it.str("bedetheque_origin")),
         yearInt = it.str("year")?.toIntOrNull(),
@@ -208,6 +219,9 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         sizeBytes = it.long("total_size"),
         votes = it.int("total_votes") ?: 0,
         genres = it.str("local_genre")?.split(',')?.map { g -> g.trim() }?.filter { g -> g.isNotEmpty() }.orEmpty(),
+        tags = tags,
+        toReadLater = it.bool("to_read_later") == true,
+        isFavorite = it.bool("is_favorite") == true,
     )
 }
 
@@ -260,6 +274,9 @@ data class SeriesDetail(
     val ebdzUrl: String?,
     /** Fiche Bédéthèque de chaque auteur (nom → URL) : ouvre ses autres séries. */
     val authorLinks: Map<String, String>,
+    val tags: List<String>,
+    val toReadLater: Boolean,
+    val isFavorite: Boolean,
     val volumes: List<VolumeRow>,
 )
 
@@ -323,6 +340,9 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
         authorLinks = bd.optJSONObject("author_links").let { links ->
             buildMap { links?.keys()?.forEach { name -> put(name, links.optString(name)) } }.filterValues { it.isNotBlank() }
         },
+        tags = o.strings("tags"),
+        toReadLater = o.bool("to_read_later") == true,
+        isFavorite = o.bool("is_favorite") == true,
         volumes = volumes,
     )
 }

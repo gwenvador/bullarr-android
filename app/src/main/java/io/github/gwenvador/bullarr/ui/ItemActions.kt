@@ -1,7 +1,22 @@
 package io.github.gwenvador.bullarr.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +39,7 @@ import io.github.gwenvador.bullarr.data.readable
 import io.github.gwenvador.bullarr.data.str
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Actions sur séries et tomes (routes Bullarr existantes) : même appel pour une série ou une sélection. */
@@ -50,6 +66,17 @@ object ItemActions {
     }
     suspend fun editSeries(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, fields: Map<String, String>) {
         api.putObject("api/series/$id/manual-metadata", JSONObject(fields))
+    }
+    /** Listes personnelles d'une série ; seul le booléen fourni est modifié côté Bullarr. */
+    suspend fun setSeriesReadingLists(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, toReadLater: Boolean? = null, isFavorite: Boolean? = null) {
+        val body = JSONObject()
+        toReadLater?.let { body.put("to_read_later", it) }
+        isFavorite?.let { body.put("is_favorite", it) }
+        api.putObject("api/series/$id/reading-lists", body)
+    }
+    /** Remplace la liste complète des tags d'une série. */
+    suspend fun setSeriesTags(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, tags: List<String>) {
+        api.putObject("api/series/$id/tags", JSONObject().put("tags", JSONArray(tags)))
     }
     suspend fun deleteVolume(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int) { api.deleteObject("api/volumes/$id") }
     suspend fun editVolume(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, fields: Map<String, String>) {
@@ -139,6 +166,60 @@ fun SeriesEditDialog(d: SeriesDetail, onDismiss: () -> Unit, onSave: (Map<String
                 val changed = values.filter { (k, st) -> st.value != initial.getValue(k) }.mapValues { it.value.value.trim() }
                 onDismiss()
                 if (changed.isNotEmpty()) onSave(changed)
+            }) { Text("Enregistrer") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
+}
+
+/** Tag comme le site le range : minuscules, espaces remplacés par des tirets. */
+fun normalizeSeriesTag(raw: String): String = raw.trim().lowercase().replace(Regex("\\s+"), "-")
+
+/** Édition des tags d'une série : une tuile retire le tag, le champ en ajoute un. Enregistre tout d'un coup. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun SeriesTagsDialog(initial: List<String>, onDismiss: () -> Unit, onSave: (List<String>) -> Unit) {
+    var tags by remember { mutableStateOf(initial) }
+    var draft by remember { mutableStateOf("") }
+    // Le champ en cours compte aussi à l'enregistrement, même sans avoir touché « + ».
+    fun withDraft(): List<String> {
+        val tag = normalizeSeriesTag(draft)
+        return if (tag.isNotEmpty() && tag !in tags) tags + tag else tags
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tags de la série") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (tags.isEmpty()) Text("Aucun tag.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    tags.forEach { tag ->
+                        InputChip(
+                            selected = false,
+                            onClick = { tags = tags - tag },
+                            label = { Text(tag) },
+                            trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Retirer $tag", modifier = Modifier.size(18.dp)) },
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = draft, onValueChange = { draft = it }, label = { Text("Nouveau tag") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { tags = withDraft(); draft = "" }),
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { tags = withDraft(); draft = "" }) {
+                        Icon(Icons.Outlined.Add, contentDescription = "Ajouter ce tag")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val finalTags = withDraft()
+                onDismiss()
+                if (finalTags != initial) onSave(finalTags)
             }) { Text("Enregistrer") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },

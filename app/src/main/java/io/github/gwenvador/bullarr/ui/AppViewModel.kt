@@ -220,6 +220,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Met à jour une ligne de la bibliothèque après une modification faite sur sa fiche, sans recharger. */
+    fun updateSeriesRow(id: Int, change: (SeriesSummary) -> SeriesSummary) {
+        series = series.map { if (it.id == id) change(it) else it }
+    }
+
     fun selectLibrary(lib: Library) {
         if (lib.id == selectedLibrary?.id) return
         series = emptyList()

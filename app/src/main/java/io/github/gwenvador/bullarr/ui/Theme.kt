@@ -144,8 +144,8 @@ fun EmptyState(title: String, detail: String? = null, modifier: Modifier = Modif
 }
 
 @Composable
-fun Tag(text: String, container: Color, content: Color) {
-    Surface(color = container, contentColor = content, shape = RoundedCornerShape(6.dp)) {
+fun Tag(text: String, container: Color, content: Color, modifier: Modifier = Modifier) {
+    Surface(color = container, contentColor = content, shape = RoundedCornerShape(6.dp), modifier = modifier) {
         Text(
             text, fontSize = 11.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),

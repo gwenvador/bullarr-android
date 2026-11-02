@@ -25,6 +25,11 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.HourglassTop
+import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -130,6 +135,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     var seriesMenu by remember { mutableStateOf(false) }
     var editingSeries by remember { mutableStateOf(false) }
     var confirmDeleteSeries by remember { mutableStateOf(false) }
+    var editingTags by remember { mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     // Sections repliées, mémorisées par type (comme le web) : valable pour toutes les séries.
@@ -142,6 +148,15 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     }
     fun setMonitored(on: Boolean) = launchAction(scope, context, if (on) "Série surveillée" else "Surveillance arrêtée", then = { attempt++ }) {
         api.postObject("api/missing-monitor/series/${summary.id}/monitor", JSONObject().put("enabled", on))
+    }
+    // Liste perso (favori ou à lire) : la fiche et la ligne de la bibliothèque suivent sans rechargement complet.
+    fun setList(toReadLater: Boolean? = null, isFavorite: Boolean? = null) = launchAction(scope, context, "Liste mise à jour", then = { attempt++ }) {
+        ItemActions.setSeriesReadingLists(api, summary.id, toReadLater, isFavorite)
+        vm.updateSeriesRow(summary.id) { row -> row.copy(toReadLater = toReadLater ?: row.toReadLater, isFavorite = isFavorite ?: row.isFavorite) }
+    }
+    fun saveTags(tags: List<String>) = launchAction(scope, context, "Tags enregistrés", then = { attempt++ }) {
+        ItemActions.setSeriesTags(api, summary.id, tags)
+        vm.updateSeriesRow(summary.id) { row -> row.copy(tags = tags) }
     }
     LaunchedEffect(summary.id, attempt) {
         error = null
@@ -182,6 +197,15 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 Header(
                     vm, summary, d, onToggleMonitor = { setMonitored(it) },
                     onAuthor = { name -> d?.authorLinks?.get(name)?.let { authorSheet = name to it } },
+                    onFavorite = { setList(isFavorite = it) },
+                    onToRead = { setList(toReadLater = it) },
+                    onEditTags = { editingTags = true },
+                    onTag = { tag ->
+                        // Tag cliqué : la bibliothèque s'ouvre filtrée sur ce tag.
+                        vm.filters = vm.filters.copy(tags = setOf(tag))
+                        vm.openSeries = null
+                        vm.section = Section.Library
+                    },
                 ) { seriesMenu = true }
             }
             if (d != null) {
@@ -252,6 +276,9 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     if (readAlso) ReadAlsoSheet(vm, api, summary.id, detail?.title ?: summary.title, onDismiss = { readAlso = false })
     authorSheet?.let { (name, link) -> AuthorAlbumsSheet(vm, api, name, link, onDismiss = { authorSheet = null }) }
     if (showHistory) SeriesHistorySheet(api, summary.id, detail?.title ?: summary.title, onDismiss = { showHistory = false })
+    if (editingTags) detail?.let { d ->
+        SeriesTagsDialog(d.tags, onDismiss = { editingTags = false }) { saveTags(it) }
+    }
     if (seriesMenu) SeriesActions(
         title = detail?.title ?: summary.title, onDismiss = { seriesMenu = false },
         onReadAlso = { readAlso = true },
@@ -319,7 +346,10 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?, onToggleMonitor: (Boolean) -> Unit, onAuthor: (String) -> Unit, onTitleClick: () -> Unit) {
+private fun Header(
+    vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?, onToggleMonitor: (Boolean) -> Unit, onAuthor: (String) -> Unit,
+    onFavorite: (Boolean) -> Unit, onToRead: (Boolean) -> Unit, onEditTags: () -> Unit, onTag: (String) -> Unit, onTitleClick: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     var actionsOpen by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -330,11 +360,39 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?, onToggl
             if (big) FullCover(coverUrl, onDismiss = { big = false })
             Spacer(Modifier.width(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    d?.title ?: s.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
-                    textDecoration = TextDecoration.Underline,
-                    modifier = Modifier.clickable { onTitleClick() },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        d?.title ?: s.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier.weight(1f, fill = false).clickable { onTitleClick() },
+                    )
+                    // Listes personnelles, à côté du titre : toucher pour ajouter ou retirer.
+                    if (d != null) {
+                        val tint = MaterialTheme.colorScheme
+                        Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                            WithTip(if (d.isFavorite) "Favori : toucher pour retirer" else "Pas en favori : toucher pour ajouter") {
+                                IconButton(onClick = { onFavorite(!d.isFavorite) }) {
+                                    Icon(
+                                        if (d.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                        contentDescription = if (d.isFavorite) "Favori" else "Pas en favori",
+                                        tint = if (d.isFavorite) tint.tertiary else tint.outline,
+                                    )
+                                }
+                            }
+                        }
+                        Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                            WithTip(if (d.toReadLater) "À lire plus tard : toucher pour retirer" else "Pas à lire plus tard : toucher pour ajouter") {
+                                IconButton(onClick = { onToRead(!d.toReadLater) }) {
+                                    Icon(
+                                        if (d.toReadLater) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                        contentDescription = if (d.toReadLater) "À lire plus tard" else "Pas à lire plus tard",
+                                        tint = if (d.toReadLater) tint.primary else tint.outline,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 // Chaque auteur qui a une fiche Bédéthèque est cliquable : ouvre ses autres séries.
                 (d?.authors ?: s.author)?.let { names ->
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -411,6 +469,20 @@ private fun Header(vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?, onToggl
                         links.forEach { (key, name, url) ->
                             Logo(key, name, 22.dp, Modifier.clickable { runCatching { uri.openUri(url) } }, tip = false)
                         }
+                    }
+                }
+                // Tags dans « Plus » avec le reste : chacun ouvre la bibliothèque filtrée, le crayon ouvre l'édition.
+                if (actionsOpen && d != null) androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                        WithTip("Modifier les tags") {
+                            IconButton(onClick = onEditTags) { Icon(Icons.Outlined.Label, contentDescription = "Modifier les tags", tint = cs.primary) }
+                        }
+                    }
+                    d.tags.forEach { tag ->
+                        Tag(tag, cs.secondaryContainer, cs.onSecondaryContainer, Modifier.clickable { onTag(tag) })
                     }
                 }
             }

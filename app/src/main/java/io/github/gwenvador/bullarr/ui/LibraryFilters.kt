@@ -1,5 +1,6 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -13,14 +14,24 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import io.github.gwenvador.bullarr.ui.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.gwenvador.bullarr.data.SeriesSummary
+import io.github.gwenvador.bullarr.data.normalize
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -34,8 +45,11 @@ data class LibraryFilters(
     val sizes: Set<String> = emptySet(),
     val votes: Set<String> = emptySet(),
     val genres: Set<String> = emptySet(),
+    /** Listes personnelles : clés de [LIST_LABELS] (« to-read », « favorite »). */
+    val lists: Set<String> = emptySet(),
+    val tags: Set<String> = emptySet(),
 ) {
-    val activeCount get() = listOf(types, origins, genres, decades, updated, volumes, sizes, votes).count { it.isNotEmpty() }
+    val activeCount get() = listOf(types, origins, genres, decades, updated, volumes, sizes, votes, lists, tags).count { it.isNotEmpty() }
     val isEmpty get() = activeCount == 0
 
     fun matches(s: SeriesSummary, now: LocalDateTime = LocalDateTime.now()): Boolean =
@@ -44,10 +58,15 @@ data class LibraryFilters(
             (decades.isEmpty() || s.yearInt?.let { it / 10 * 10 in decades } == true) &&
             (updated.isEmpty() || updated.any { updatedMatches(it, s, now) }) &&
             (genres.isEmpty() || s.genres.any { it in genres }) &&
+            (lists.isEmpty() || lists.any { listMatches(it, s) }) &&
+            (tags.isEmpty() || s.tags.any { it in tags }) &&
             (votes.isEmpty() || votes.any { voteBucket(it, s.votes) }) &&
             (volumes.isEmpty() || volumes.any { volumeBucket(it, s.volumeCount) }) &&
             (sizes.isEmpty() || s.sizeBytes?.let { b -> sizes.any { sizeBucket(it, b) } } == true)
 }
+
+/** Nombre maximal de tags proposés dans la feuille de filtres. */
+private const val TAG_LIMIT = 40
 
 /** Origine Bédéthèque → type affiché. */
 val ORIGIN_NAMES = mapOf("Europe" to "BD", "USA" to "Comics", "Asie" to "Manga")
@@ -56,6 +75,13 @@ val UPDATED_LABELS = linkedMapOf("7" to "7 derniers jours", "30" to "30 derniers
 val VOLUME_LABELS = linkedMapOf("0" to "Aucun", "1" to "1", "2-5" to "2 à 5", "6-10" to "6 à 10", "11-20" to "11 à 20", "21+" to "21 et plus")
 val VOTE_LABELS = linkedMapOf("0" to "Aucun vote", "1-10" to "1 à 10", "11-50" to "11 à 50", "51-100" to "51 à 100", "100+" to "Plus de 100")
 val SIZE_LABELS = linkedMapOf("<100" to "< 100 Mo", "100-500" to "100 à 500 Mo", "500-1000" to "500 Mo à 1 Go", "1-5" to "1 à 5 Go", ">5" to "> 5 Go")
+val LIST_LABELS = linkedMapOf("to-read" to "À lire plus tard", "favorite" to "Favoris")
+
+fun listMatches(key: String, s: SeriesSummary) = when (key) {
+    "to-read" -> s.toReadLater
+    "favorite" -> s.isFavorite
+    else -> false
+}
 
 fun typeOf(s: SeriesSummary) = when {
     s.isIntegral -> "integrale"
@@ -85,6 +111,30 @@ fun sizeBucket(key: String, b: Long) = when (key) {
     "1-5" -> b in 1000 * MO until 5000 * MO; else -> b >= 5000 * MO
 }
 
+/**
+ * Groupe de filtres repliable : le titre se touche pour l'ouvrir ou le fermer. Replié par défaut,
+ * sauf si un filtre du groupe est déjà actif (le nombre à droite du titre).
+ */
+@Composable
+private fun CollapsibleSection(title: String, activeCount: Int, content: @Composable () -> Unit) {
+    var open by rememberSaveable(title) { mutableStateOf(activeCount > 0) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            if (activeCount > 0) Text("$activeCount", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Icon(
+                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = if (open) "Replier $title" else "Déplier $title",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (open) content()
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, resultCount: Int, onChange: (LibraryFilters) -> Unit, onDismiss: () -> Unit) {
@@ -92,14 +142,15 @@ fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, result
     val origins = all.map { it.origin ?: "Autre" }.distinct().sorted()
     // Genres les plus fréquents d'abord.
     val genreCounts = all.flatMap { it.genres }.groupingBy { it }.eachCount().toList().sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first.lowercase() })
+    // Tags les plus utilisés d'abord, comme les genres.
+    val tagCounts = all.flatMap { it.tags }.groupingBy { it }.eachCount().toList().sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
     val hasSizes = all.any { it.sizeBytes != null }
 
     fun <T> toggle(set: Set<T>, v: T) = if (v in set) set - v else set + v
 
     @Composable
     fun <T> Group(title: String, options: List<Pair<T, String>>, selected: Set<T>, count: (T) -> Int, flags: Boolean = false, set: (Set<T>) -> Unit) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        CollapsibleSection(title, selected.size) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 options.forEach { (k, label) ->
                     FilterChip(selected = k in selected, onClick = { set(toggle(selected, k)) }, label = {
@@ -127,6 +178,34 @@ fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, result
             }
             if (genreCounts.isNotEmpty()) item {
                 Group("Genre", genreCounts.map { it.first to it.first }, filters.genres, { k -> all.count { s -> k in s.genres } }) { onChange(filters.copy(genres = it)) }
+            }
+            item { Group("Listes", LIST_LABELS.toList(), filters.lists, { k -> all.count { s -> listMatches(k, s) } }) { onChange(filters.copy(lists = it)) } }
+            // Beaucoup de tags : seule une partie est affichée, la recherche trouve le reste.
+            if (tagCounts.isNotEmpty()) item {
+                var tagQuery by remember { mutableStateOf("") }
+                val wanted = normalize(tagQuery).replace('-', ' ').trim()
+                val matching = tagCounts.filter { (tag, _) -> wanted.isEmpty() || normalize(tag).replace('-', ' ').contains(wanted) }
+                // Les tags déjà cochés restent visibles, même hors recherche.
+                val shown = (matching.filter { it.first in filters.tags } + matching.filter { it.first !in filters.tags }).take(TAG_LIMIT)
+                CollapsibleSection("Tags", filters.tags.size) {
+                  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = tagQuery, onValueChange = { tagQuery = it }, label = { Text("Chercher un tag") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        shown.forEach { (tag, count) ->
+                            FilterChip(selected = tag in filters.tags, onClick = { onChange(filters.copy(tags = toggle(filters.tags, tag))) }, label = {
+                                Text("$tag · $count")
+                            })
+                        }
+                    }
+                    if (matching.size > shown.size) Text(
+                        "${matching.size - shown.size} autre(s) tag(s) : affinez la recherche.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                }
             }
             item { Group("Format", TYPE_LABELS.toList(), filters.types, { k -> all.count { typeOf(it) == k } }) { onChange(filters.copy(types = it)) } }
             item {
