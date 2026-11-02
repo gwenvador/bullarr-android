@@ -225,4 +225,6 @@ fieldset select, fieldset input, #reposelect select, #reposelect input {
     float               : left;
     line-height         : 1.5em;
   }
-}
+}/* Bullarr : texte plus grand */
+body, td { font-size: 18px; }
+#intro { font-size: 1.05em; }
