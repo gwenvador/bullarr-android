@@ -30,6 +30,21 @@ clé maître dans le Keystore Android).
 **Mises à jour** : Configuration → Connexion affiche la version installée et compare avec la
 dernière release GitHub (l'APK doit s'appeler `bullarr-android-<version>.apk`).
 
+### Dépôt F-Droid
+
+Bullarr est aussi disponible dans un dépôt F-Droid, qui met l'app à jour sans passer par un APK manuel.
+Ajoutez le dépôt dans F-Droid avec ce lien :
+
+    https://gwenvador.github.io/bullarr-android/repo
+
+Ou ouvrez ce lien depuis un téléphone qui a F-Droid :
+
+    fdroidrepo://gwenvador.github.io/bullarr-android/repo?fingerprint=652E77168C22C56A08E277B00AC1D5B7F095B1F8FE6522A1508D1450BA803892
+
+Empreinte SHA-256 de la clé de signature du dépôt, à vérifier si F-Droid la demande :
+
+    65 2E 77 16 8C 22 C5 6A 08 E2 77 B0 0A C1 D5 B7 F0 95 B1 F8 FE 65 22 A1 50 8D 14 50 BA 80 38 92
+
 ## Navigation
 
 La barre du bas reprend les 5 rubriques de la barre latérale web :
