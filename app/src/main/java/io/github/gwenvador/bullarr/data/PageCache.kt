@@ -78,7 +78,7 @@ object PageCache {
 
     fun cachedThumb(volumeId: Int, page: Int): Bitmap? = thumbs.get("$volumeId:$page")
 
-    /** Miniature d'une page : reprise de la page déjà en mémoire, sinon copie hors ligne ou téléchargement réduit. */
+    /** Miniature d'une page : page déjà en mémoire, copie hors ligne, miniature du serveur ou, à défaut, page réduite. */
     suspend fun thumb(api: BullarrApi, volumeId: Int, page: Int, offline: OfflineStore? = null): Bitmap {
         val key = "$volumeId:$page"
         thumbs.get(key)?.let { return it }
@@ -93,7 +93,10 @@ object PageCache {
                     else Bitmap.createScaledBitmap(soft, (soft.width * ratio).toInt().coerceAtLeast(1), (soft.height * ratio).toInt().coerceAtLeast(1), true)
                 } else {
                     val local = offline?.pageFile(volumeId, page)?.takeIf { it.length() > 0 }
-                    val bytes = local?.readBytes() ?: api.getBytes("api/volumes/$volumeId/reader/page/$page")
+                    // Miniature servie par Bullarr (petite image) ; à défaut (serveur plus ancien), la page entière.
+                    val bytes = local?.readBytes()
+                        ?: runCatching { api.getBytes("api/volumes/$volumeId/reader/thumb/$page") }.getOrNull()
+                        ?: api.getBytes("api/volumes/$volumeId/reader/page/$page")
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                     var sample = 1

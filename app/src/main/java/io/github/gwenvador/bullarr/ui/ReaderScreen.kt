@@ -3,12 +3,15 @@ package io.github.gwenvador.bullarr.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -18,48 +21,51 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.FitScreen
+import androidx.compose.material.icons.outlined.FormatTextdirectionLToR
+import androidx.compose.material.icons.outlined.FormatTextdirectionRToL
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.ViewCarousel
 import androidx.compose.material.icons.outlined.ViewDay
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import io.github.gwenvador.bullarr.ui.Icon
-import io.github.gwenvador.bullarr.ui.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,17 +73,24 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -85,13 +98,15 @@ import androidx.core.view.WindowInsetsControllerCompat
 import io.github.gwenvador.bullarr.data.BullarrApi
 import io.github.gwenvador.bullarr.data.OfflineStore
 import io.github.gwenvador.bullarr.data.PageCache
-import io.github.gwenvador.bullarr.data.ReadingProgress
 import io.github.gwenvador.bullarr.data.ReaderMeta
+import io.github.gwenvador.bullarr.data.ReadingProgress
 import io.github.gwenvador.bullarr.data.parseReaderMeta
+import io.github.gwenvador.bullarr.data.parseSeriesDetail
 import io.github.gwenvador.bullarr.data.readable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /** Tome à lire. */
 data class ReaderTarget(val volumeId: Int, val title: String)
@@ -102,6 +117,7 @@ private val Context.activity: Activity?
 @Composable
 fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
     // Hors connexion (non connecté) : un client factice suffit, les albums copiés sont lus sans réseau.
+    val online = vm.api != null
     val api = vm.api ?: remember { BullarrApi("http://localhost/", "") }
     val view = LocalView.current
     val context = LocalContext.current
@@ -135,10 +151,35 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
         catch (e: Exception) { error = e.readable() }
     }
 
+    // Tome suivant de la série (possédé) : proposé à la dernière page.
+    var next by remember(target.volumeId) { mutableStateOf<ReaderTarget?>(null) }
+    LaunchedEffect(meta?.seriesId) {
+        val m = meta ?: return@LaunchedEffect
+        val sid = m.seriesId ?: return@LaunchedEffect
+        next = try {
+            if (!online) throw IllegalStateException()
+            val d = parseSeriesDetail(api.getObject("api/series/$sid"))
+            val owned = d.volumes.filter { it.owned }
+            val i = owned.indexOfFirst { it.id == m.volumeId }
+            owned.getOrNull(i + 1)?.takeIf { i >= 0 }?.let { ReaderTarget(it.id, "${d.title} · ${it.label}") }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) {
+            // Sans réseau : le tome suivant parmi les albums copiés sur le téléphone.
+            val copies = vm.offline.store.list().map { it.meta }.filter { it.seriesId == sid }
+                .sortedBy { Regex("\\d+").find(it.label.orEmpty())?.value?.toIntOrNull() ?: Int.MAX_VALUE }
+            val i = copies.indexOfFirst { it.volumeId == m.volumeId }
+            copies.getOrNull(i + 1)?.takeIf { i >= 0 }?.let { ReaderTarget(it.volumeId, listOfNotNull(it.seriesTitle, it.label).joinToString(" · ")) }
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         val m = meta
         when {
-            m != null -> Reader(api, vm.offline.store, m, ReadingProgress(context), onClose)
+            // Une clé par tome : passer au suivant repart d'un lecteur neuf.
+            m != null -> key(m.volumeId) {
+                val manga = vm.series.firstOrNull { it.id == m.seriesId }?.origin == "Asie"
+                Reader(api, online, vm.offline.store, m, ReadingProgress(context), manga, next, onNext = { vm.reading = it }, onClose = onClose)
+            }
             else -> {
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     if (error == null) CircularProgressIndicator(color = Color.White)
@@ -155,8 +196,16 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
     }
 }
 
+/** Couverture seule, puis les pages deux par deux (2-3, 4-5…), comme un album ouvert. */
+private fun spreadsOf(total: Int, double: Boolean): List<List<Int>> =
+    if (!double || total < 3) (0 until total).map { listOf(it) }
+    else listOf(listOf(0)) + (1 until total).chunked(2)
+
 @Composable
-private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, progress: ReadingProgress, onClose: () -> Unit) {
+private fun Reader(
+    api: BullarrApi, online: Boolean, offline: OfflineStore, meta: ReaderMeta, progress: ReadingProgress,
+    manga: Boolean, next: ReaderTarget?, onNext: (ReaderTarget) -> Unit, onClose: () -> Unit,
+) {
     val total = meta.pageCount
     if (total <= 0) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -168,7 +217,6 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
         return
     }
     val start = (progress.get(meta.volumeId) ?: 0).coerceIn(0, total - 1)
-    val pager = rememberPagerState(initialPage = start) { total }
     val scope = rememberCoroutineScope()
     var bars by remember { mutableStateOf(true) }
     var barsTick by remember { mutableIntStateOf(0) }
@@ -176,6 +224,17 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
     var sliderPos by remember { mutableStateOf<Float?>(null) }
     var fitWidth by remember { mutableStateOf(progress.fitWidth) }
     var webtoon by remember { mutableStateOf(progress.webtoon) }
+    // Sens manga (droite → gauche) : par série, activé d'office pour une série d'origine Asie.
+    var rtl by remember { mutableStateOf(progress.rtl(meta.seriesId, manga)) }
+    var doublePref by remember { mutableStateOf(progress.doublePage) }
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val double = landscape && doublePref && !webtoon
+    val spreads = remember(total, double) { spreadsOf(total, double) }
+    fun spreadOf(page: Int) = spreads.indexOfFirst { page in it }.coerceAtLeast(0)
+
+    // Dernière page affichée : sert de point de reprise quand la vue change (webtoon, double page).
+    val lastSeen = remember { intArrayOf(start) }
+    val pager = key(double) { rememberPagerState(initialPage = spreadOf(lastSeen[0])) { spreads.size } }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = start)
     // Webtoon : la page courante est celle qui occupe le milieu de l'écran (la dernière une fois en bas).
     val listPage by remember {
@@ -189,38 +248,58 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
             }
         }
     }
-    val current = if (webtoon) listPage else pager.currentPage
-    // Au changement de mode, l'autre vue reprend à la même page.
-    var modePage by remember { mutableIntStateOf(start) }
-    LaunchedEffect(webtoon) { if (webtoon) list.scrollToItem(modePage) else pager.scrollToPage(modePage) }
+    val spread = spreads.getOrElse(pager.currentPage) { listOf(0) }
+    val current = if (webtoon) listPage else spread.first()
+    val atEnd = if (webtoon) listPage == total - 1 else spread.last() == total - 1
+    SideEffect { lastSeen[0] = current }
+    LaunchedEffect(webtoon) { if (webtoon) list.scrollToItem(lastSeen[0]) else pager.scrollToPage(spreadOf(lastSeen[0])) }
 
     // Barres masquées après quelques secondes.
     LaunchedEffect(bars, barsTick) { if (bars) { delay(3500); bars = false } }
-    // Mémorise la page ; un album fini repart du début.
-    LaunchedEffect(current) { progress.save(meta.volumeId, current, total) }
-    // Précharge d'abord la page courante, puis les 2 suivantes (et la précédente pour revenir).
+    // Mémorise la page (et l'album pour « Continuer la lecture ») ; un album fini repart du début.
+    LaunchedEffect(current, atEnd) { progress.save(meta.volumeId, if (atEnd) total - 1 else current, total, meta) }
+    // Envoie la page lue à Bullarr, qui la transmet à Komga (sans effet si Komga n'est pas relié).
+    LaunchedEffect(current, atEnd) {
+        if (!online) return@LaunchedEffect
+        delay(2000)
+        runCatching {
+            api.postObject(
+                "api/volumes/${meta.volumeId}/reader/progress",
+                JSONObject().put("page", if (atEnd) total else current + 1).put("completed", atEnd),
+            )
+        }
+    }
+    // Précharge d'abord la page courante, puis les suivantes (et la précédente pour revenir).
     LaunchedEffect(current) {
-        for (i in listOf(current, current + 1, current + 2, current - 1)) {
+        for (i in listOf(current, current + 1, current + 2, current + 3, current - 1)) {
             if (i in 0 until total) launch { runCatching { PageCache.get(api, meta.volumeId, i + 1, offline) } }
         }
     }
 
     fun go(delta: Int) {
-        val to = (current + delta).coerceIn(0, total - 1)
-        if (to != current) scope.launch { if (webtoon) list.animateScrollToItem(to) else pager.animateScrollToPage(to) }
+        if (delta > 0 && atEnd) { next?.let(onNext); return }
+        scope.launch {
+            if (webtoon) list.animateScrollToItem((current + delta).coerceIn(0, total - 1))
+            else pager.animateScrollToPage((pager.currentPage + delta).coerceIn(0, spreads.size - 1))
+        }
     }
-    fun jump(to: Int) {
-        val p = to.coerceIn(0, total - 1)
-        scope.launch { if (webtoon) list.scrollToItem(p) else pager.scrollToPage(p) }
+    fun jump(page: Int) {
+        val p = page.coerceIn(0, total - 1)
+        scope.launch { if (webtoon) list.scrollToItem(p) else pager.scrollToPage(spreadOf(p)) }
     }
 
+    // Zoom du mode webtoon : pincement à deux doigts, puis déplacement.
+    var wScale by remember { mutableStateOf(1f) }
+    var wOffset by remember { mutableStateOf(Offset.Zero) }
+    LaunchedEffect(webtoon) { wScale = 1f; wOffset = Offset.Zero }
+
     Box(
-        Modifier.fillMaxSize().pointerInput(total) {
+        Modifier.fillMaxSize().pointerInput(total, rtl) {
             detectTapGestures { pos ->
                 val x = pos.x / size.width
                 when {
-                    x < 0.3f -> go(-1)
-                    x > 0.7f -> go(+1)
+                    x < 0.3f -> go(if (rtl) +1 else -1)
+                    x > 0.7f -> go(if (rtl) -1 else +1)
                     else -> bars = !bars
                 }
             }
@@ -228,13 +307,50 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
     ) {
         if (webtoon) {
             // Webtoon : pages à la largeur de l'écran, collées les unes aux autres, on fait défiler.
-            LazyColumn(Modifier.fillMaxSize(), state = list) {
-                items(total, key = { it }) { index -> WebtoonPage(api, offline, meta.volumeId, index + 1) }
+            Box(
+                Modifier.fillMaxSize().pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pinch = event.changes.size > 1
+                            if (pinch || wScale > 1f) {
+                                val s = if (pinch) (wScale * event.calculateZoom()).coerceIn(1f, 4f).let { if (it < 1.03f) 1f else it } else wScale
+                                val pan = event.calculatePan()
+                                val maxX = size.width * (s - 1f) / 2f
+                                val maxY = size.height * (s - 1f)
+                                wOffset = if (s == 1f) Offset.Zero else Offset(
+                                    (wOffset.x + pan.x).coerceIn(-maxX, maxX),
+                                    if (pinch) (wOffset.y + pan.y).coerceIn(-maxY, 0f) else wOffset.y,
+                                )
+                                wScale = s
+                                // Le pincement ne fait pas défiler la liste ; à un doigt, le défilement vertical reste à la liste.
+                                if (pinch) event.changes.forEach { if (it.positionChanged()) it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                },
+            ) {
+                LazyColumn(
+                    Modifier.fillMaxSize().graphicsLayer(
+                        scaleX = wScale, scaleY = wScale, translationX = wOffset.x, translationY = wOffset.y,
+                        transformOrigin = TransformOrigin(0.5f, 0f),
+                    ),
+                    state = list,
+                ) {
+                    items(total, key = { it }) { index -> WebtoonPage(api, offline, meta.volumeId, index + 1) }
+                }
             }
         } else {
-            // Les 2 pages suivantes sont déjà composées : le glissement n'attend rien.
-            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, beyondViewportPageCount = 2, key = { it }) { index ->
-                PageView(api, offline, meta.volumeId, index + 1, isCurrent = index == pager.currentPage, fitWidth = fitWidth) { zoomed = it }
+            // Les 2 vues suivantes sont déjà composées : le glissement n'attend rien. Manga : la suivante est à gauche.
+            HorizontalPager(
+                pager, Modifier.fillMaxSize(), reverseLayout = rtl, userScrollEnabled = !zoomed,
+                beyondViewportPageCount = 2, key = { spreads[it].first() },
+            ) { index ->
+                PageView(
+                    api, offline, meta.volumeId, spreads[index].map { it + 1 }, isCurrent = index == pager.currentPage,
+                    fitWidth = fitWidth && !double, rtl = rtl,
+                ) { zoomed = it }
             }
         }
 
@@ -249,50 +365,80 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
                     val sub = listOfNotNull(meta.label, meta.title?.takeIf { it != meta.seriesTitle }).joinToString(" · ")
                     if (sub.isNotEmpty()) Text(sub, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                // Sens de lecture : gauche → droite ou manga (droite → gauche), mémorisé pour la série.
+                if (!webtoon) IconButton(onClick = { rtl = !rtl; progress.setRtl(meta.seriesId, rtl); barsTick++ }) {
+                    Icon(
+                        if (rtl) Icons.Outlined.FormatTextdirectionRToL else Icons.Outlined.FormatTextdirectionLToR,
+                        contentDescription = if (rtl) "Sens manga (droite → gauche)" else "Sens de lecture gauche → droite", tint = Color.White,
+                    )
+                }
+                // Double page en paysage.
+                if (landscape && !webtoon) IconButton(onClick = { doublePref = !doublePref; progress.doublePage = doublePref; zoomed = false; barsTick++ }) {
+                    Icon(
+                        Icons.Outlined.AutoStories, contentDescription = if (doublePref) "Une page à la fois" else "Deux pages côte à côte",
+                        tint = Color.White, modifier = Modifier.alpha(if (doublePref) 1f else 0.5f),
+                    )
+                }
                 // Pages ↔ webtoon (lecture en défilement vertical continu).
-                IconButton(onClick = { modePage = current; webtoon = !webtoon; progress.webtoon = webtoon; zoomed = false; barsTick++ }) {
+                IconButton(onClick = { webtoon = !webtoon; progress.webtoon = webtoon; zoomed = false; barsTick++ }) {
                     Icon(
                         if (webtoon) Icons.Outlined.ViewCarousel else Icons.Outlined.ViewDay,
                         contentDescription = if (webtoon) "Lire page par page" else "Mode webtoon (défilement vertical)", tint = Color.White,
                     )
                 }
                 // Page entière ↔ pleine largeur (on fait défiler la page vers le bas).
-                if (!webtoon) TextButton(onClick = { fitWidth = !fitWidth; progress.fitWidth = fitWidth; barsTick++ }) {
+                if (!webtoon && !double) IconButton(onClick = { fitWidth = !fitWidth; progress.fitWidth = fitWidth; barsTick++ }) {
                     Icon(
                         if (fitWidth) Icons.Outlined.FitScreen else Icons.Outlined.SwapVert,
-                        contentDescription = null, tint = Color.White, modifier = Modifier.padding(end = 6.dp),
+                        contentDescription = if (fitWidth) "Page entière" else "Pleine largeur", tint = Color.White,
                     )
-                    Text(if (fitWidth) "Page entière" else "Pleine largeur", color = Color.White)
                 }
             }
         }
 
-        AnimatedVisibility(bars, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
-            Column(
-                Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.7f)).windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Thumbnails(api, offline, meta.volumeId, total, sliderPos?.toInt()?.minus(1) ?: current) { to ->
-                    barsTick++
-                    jump(to)
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Dernière page : le tome suivant est proposé, même barres masquées.
+            AnimatedVisibility(atEnd && next != null, enter = fadeIn(), exit = fadeOut()) {
+                Button(
+                    onClick = { next?.let(onNext) },
+                    modifier = Modifier.padding(bottom = 12.dp).then(if (bars) Modifier else Modifier.windowInsetsPadding(WindowInsets.navigationBars)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                ) {
+                    Text("Tome suivant : ${next?.title?.substringAfterLast(" · ") ?: ""}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null, modifier = Modifier.padding(start = 8.dp))
                 }
-                Text("${(sliderPos?.toInt() ?: (current + 1))} / $total", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                if (total > 1) {
-                    Slider(
-                        value = sliderPos ?: (current + 1).toFloat(),
-                        onValueChange = { sliderPos = it; barsTick++ },
-                        onValueChangeFinished = {
-                            val to = (sliderPos?.toInt() ?: (current + 1)) - 1
-                            sliderPos = null
+            }
+            AnimatedVisibility(bars, enter = fadeIn(), exit = fadeOut()) {
+                Column(
+                    Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.7f)).windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // Manga : miniatures et curseur vont de droite à gauche, comme les pages.
+                    val direction = if (rtl && !webtoon) LayoutDirection.Rtl else LayoutDirection.Ltr
+                    CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                        Thumbnails(api, offline, meta.volumeId, total, sliderPos?.toInt()?.minus(1) ?: current) { to ->
+                            barsTick++
                             jump(to)
-                        },
-                        valueRange = 1f..total.toFloat(),
-                        steps = (total - 2).coerceAtLeast(0),
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f), activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
-                        ),
-                    )
+                        }
+                    }
+                    Text("${(sliderPos?.toInt() ?: (current + 1))} / $total", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    if (total > 1) CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                        Slider(
+                            value = sliderPos ?: (current + 1).toFloat(),
+                            onValueChange = { sliderPos = it; barsTick++ },
+                            onValueChangeFinished = {
+                                val to = (sliderPos?.toInt() ?: (current + 1)) - 1
+                                sliderPos = null
+                                jump(to)
+                            },
+                            valueRange = 1f..total.toFloat(),
+                            steps = (total - 2).coerceAtLeast(0),
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.3f), activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -336,12 +482,15 @@ private fun Thumbnails(api: BullarrApi, offline: OfflineStore, volumeId: Int, to
     }
 }
 
-/** Page du mode webtoon : pleine largeur, hauteur selon l'image (une hauteur provisoire pendant le chargement). */
+/** État de chargement d'une page. */
+private class PageLoad(val bitmap: android.graphics.Bitmap?, val error: String?, val retry: () -> Unit)
+
+/** Chargement d'une page : bitmap en cache, sinon téléchargée ; erreur lisible avec réessai. */
 @Composable
-private fun WebtoonPage(api: BullarrApi, offline: OfflineStore, volumeId: Int, page: Int) {
+private fun rememberPage(api: BullarrApi, offline: OfflineStore, volumeId: Int, page: Int): PageLoad {
     var bitmap by remember(volumeId, page) { mutableStateOf(PageCache.cached(volumeId, page)) }
     var error by remember(volumeId, page) { mutableStateOf<String?>(null) }
-    var attempt by remember { mutableIntStateOf(0) }
+    var attempt by remember(volumeId, page) { mutableIntStateOf(0) }
     LaunchedEffect(volumeId, page, attempt) {
         if (bitmap != null) return@LaunchedEffect
         error = null
@@ -349,39 +498,60 @@ private fun WebtoonPage(api: BullarrApi, offline: OfflineStore, volumeId: Int, p
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = "Page $page : ${e.readable()}" }
     }
-    val b = bitmap
+    return PageLoad(bitmap, error) { attempt++ }
+}
+
+@Composable
+private fun PageError(message: String, onRetry: () -> Unit) {
+    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(message, color = Color.White, textAlign = TextAlign.Center)
+        TextButton(onClick = onRetry) { Text("Réessayer") }
+    }
+}
+
+/** Page du mode webtoon : pleine largeur, hauteur selon l'image (une hauteur provisoire pendant le chargement). */
+@Composable
+private fun WebtoonPage(api: BullarrApi, offline: OfflineStore, volumeId: Int, page: Int) {
+    val p = rememberPage(api, offline, volumeId, page)
+    val b = p.bitmap
     if (b != null) Image(
         b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.FillWidth,
         modifier = Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height.coerceAtLeast(1)),
     )
     else Box(Modifier.fillMaxWidth().aspectRatio(0.72f), contentAlignment = Alignment.Center) {
-        if (error != null) Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(error!!, color = Color.White, textAlign = TextAlign.Center)
-            TextButton(onClick = { attempt++ }) { Text("Réessayer") }
-        }
-        else CircularProgressIndicator(color = Color.White)
+        if (p.error != null) PageError(p.error, p.retry) else CircularProgressIndicator(color = Color.White)
     }
 }
 
-/** Une page : chargement, erreur lisible avec réessai, zoom par pincement (jusqu'à ×5) puis déplacement. */
+/** Une moitié de double page : collée au pli (côté intérieur). */
 @Composable
-private fun PageView(api: BullarrApi, offline: OfflineStore, volumeId: Int, page: Int, isCurrent: Boolean, fitWidth: Boolean, onZoom: (Boolean) -> Unit) {
-    var bitmap by remember(volumeId, page) { mutableStateOf(PageCache.cached(volumeId, page)) }
-    var error by remember(volumeId, page) { mutableStateOf<String?>(null) }
-    var attempt by remember { mutableIntStateOf(0) }
-    LaunchedEffect(volumeId, page, attempt) {
-        if (bitmap != null) return@LaunchedEffect
-        error = null
-        try { bitmap = PageCache.get(api, volumeId, page, offline) }
-        catch (e: CancellationException) { throw e }
-        catch (e: Exception) { error = "Page $page : ${e.readable()}" }
+private fun HalfPage(api: BullarrApi, offline: OfflineStore, volumeId: Int, page: Int, alignment: Alignment, modifier: Modifier) {
+    val p = rememberPage(api, offline, volumeId, page)
+    val b = p.bitmap
+    Box(modifier, contentAlignment = Alignment.Center) {
+        when {
+            b != null -> Image(b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.Fit, alignment = alignment, modifier = Modifier.fillMaxSize())
+            p.error != null -> PageError(p.error, p.retry)
+            else -> CircularProgressIndicator(color = Color.White)
+        }
     }
+}
 
+/**
+ * Une vue du lecteur : une page, ou deux côte à côte (paysage). Zoom par pincement (jusqu'à ×5) puis
+ * déplacement ; erreur lisible avec réessai.
+ */
+@Composable
+private fun PageView(
+    api: BullarrApi, offline: OfflineStore, volumeId: Int, pages: List<Int>, isCurrent: Boolean,
+    fitWidth: Boolean, rtl: Boolean, onZoom: (Boolean) -> Unit,
+) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     // Une page qui n'est plus affichée revient à sa taille.
     LaunchedEffect(isCurrent, fitWidth) { if (!isCurrent || fitWidth) { scale = 1f; offset = Offset.Zero } }
     LaunchedEffect(scale, isCurrent) { if (isCurrent) onZoom(scale > 1.01f) }
+    val zoom = Modifier.graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y)
 
     Box(
         Modifier.fillMaxSize().pointerInput(Unit) {
@@ -392,9 +562,9 @@ private fun PageView(api: BullarrApi, offline: OfflineStore, volumeId: Int, page
                 do {
                     val event = awaitPointerEvent()
                     if (event.changes.size > 1 || scale > 1f) {
-                        val zoom = event.calculateZoom()
+                        val z = event.calculateZoom()
                         val pan = event.calculatePan()
-                        var s = (scale * zoom).coerceIn(1f, 5f)
+                        var s = (scale * z).coerceIn(1f, 5f)
                         if (s < 1.03f) s = 1f
                         val maxX = size.width * (s - 1f) / 2f
                         val maxY = size.height * (s - 1f) / 2f
@@ -408,29 +578,38 @@ private fun PageView(api: BullarrApi, offline: OfflineStore, volumeId: Int, page
         },
         contentAlignment = Alignment.Center,
     ) {
-        val b = bitmap
-        when {
-            b != null && fitWidth -> Box(
-                // Pleine largeur : centrée si elle est plus basse que l'écran (portrait),
-                // sinon on la fait défiler (paysage).
-                Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-            ) {
-                Column(Modifier.align(Alignment.Center).verticalScroll(rememberScrollState())) {
-                    Image(
-                        b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.FillWidth,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+        if (pages.size > 1) {
+            // Double page : la première page à gauche (à droite en manga), les deux collées au pli.
+            CompositionLocalProvider(LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                Row(Modifier.fillMaxSize().then(zoom)) {
+                    HalfPage(api, offline, volumeId, pages[0], Alignment.CenterEnd, Modifier.weight(1f).fillMaxHeight())
+                    HalfPage(api, offline, volumeId, pages[1], Alignment.CenterStart, Modifier.weight(1f).fillMaxHeight())
                 }
             }
-            b != null -> Image(
-                b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-            )
-            error != null -> Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(error!!, color = Color.White, textAlign = TextAlign.Center)
-                TextButton(onClick = { attempt++ }) { Text("Réessayer") }
+        } else {
+            val page = pages.first()
+            val p = rememberPage(api, offline, volumeId, page)
+            val b = p.bitmap
+            when {
+                b != null && fitWidth -> Box(
+                    // Pleine largeur : centrée si elle est plus basse que l'écran (portrait),
+                    // sinon on la fait défiler (paysage).
+                    Modifier.fillMaxSize().then(zoom),
+                ) {
+                    Column(Modifier.align(Alignment.Center).verticalScroll(rememberScrollState())) {
+                        Image(
+                            b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.FillWidth,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                b != null -> Image(
+                    b.asImageBitmap(), contentDescription = "Page $page", contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().then(zoom),
+                )
+                p.error != null -> PageError(p.error, p.retry)
+                else -> CircularProgressIndicator(color = Color.White)
             }
-            else -> CircularProgressIndicator(color = Color.White)
         }
     }
 }
