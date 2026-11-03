@@ -18,6 +18,11 @@ class ReadingProgress(context: Context) {
         get() = prefs.getBoolean("fit_width", false)
         set(value) = prefs.edit().putBoolean("fit_width", value).apply()
 
+    /** Réglage global du lecteur : mode webtoon, les pages se suivent à la verticale et on lit en faisant défiler. */
+    var webtoon: Boolean
+        get() = prefs.getBoolean("webtoon", false)
+        set(value) = prefs.edit().putBoolean("webtoon", value).apply()
+
     /** Dernière page lue (0-based), ou null : jamais lu, ou album fini (on repart du début). */
     fun get(volumeId: Int): Int? = prefs.getInt("page_$volumeId", -1).takeIf { it >= 0 }
 
