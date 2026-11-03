@@ -8,6 +8,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -68,7 +69,45 @@ object PageCache {
             ?: throw ApiException("Page $page : l'image reçue est illisible (${bytes.size} octets).")
     }
 
+    // Miniatures : petites images (≈ 300 px) dérivées des pages, cache à part et plus léger.
+    private val thumbs = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+    }
+    private val thumbGate = Semaphore(2)
+    private const val THUMB_SIDE = 320
+
+    fun cachedThumb(volumeId: Int, page: Int): Bitmap? = thumbs.get("$volumeId:$page")
+
+    /** Miniature d'une page : reprise de la page déjà en mémoire, sinon copie hors ligne ou téléchargement réduit. */
+    suspend fun thumb(api: BullarrApi, volumeId: Int, page: Int, offline: OfflineStore? = null): Bitmap {
+        val key = "$volumeId:$page"
+        thumbs.get(key)?.let { return it }
+        return thumbGate.withPermit {
+            thumbs.get(key)?.let { return@withPermit it }
+            withContext(Dispatchers.IO) {
+                val full = cache.get(key)
+                val small = if (full != null) {
+                    val soft = full.copy(Bitmap.Config.ARGB_8888, false)
+                    val ratio = THUMB_SIDE.toFloat() / maxOf(soft.width, soft.height)
+                    if (ratio >= 1f) soft
+                    else Bitmap.createScaledBitmap(soft, (soft.width * ratio).toInt().coerceAtLeast(1), (soft.height * ratio).toInt().coerceAtLeast(1), true)
+                } else {
+                    val local = offline?.pageFile(volumeId, page)?.takeIf { it.length() > 0 }
+                    val bytes = local?.readBytes() ?: api.getBytes("api/volumes/$volumeId/reader/page/$page")
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    var sample = 1
+                    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= THUMB_SIDE) sample *= 2
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                        ?: throw ApiException("Page $page : l'image reçue est illisible (${bytes.size} octets).")
+                }
+                small.also { thumbs.put(key, it) }
+            }
+        }
+    }
+
     fun clear() {
+        thumbs.evictAll()
         synchronized(inflight) { inflight.values.forEach { it.cancel() }; inflight.clear() }
         cache.evictAll()
     }

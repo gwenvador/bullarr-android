@@ -18,6 +18,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -222,6 +232,10 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
                 Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.7f)).windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                Thumbnails(api, offline, meta.volumeId, total, sliderPos?.toInt()?.minus(1) ?: current) { to ->
+                    barsTick++
+                    scope.launch { pager.scrollToPage(to) }
+                }
                 Text("${(sliderPos?.toInt() ?: (current + 1))} / $total", color = Color.White, style = MaterialTheme.typography.titleMedium)
                 if (total > 1) {
                     Slider(
@@ -240,6 +254,43 @@ private fun Reader(api: BullarrApi, offline: OfflineStore, meta: ReaderMeta, pro
                         ),
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Bandeau de miniatures : la page courante est cerclée et centrée ; toucher une miniature y saute. */
+@Composable
+private fun Thumbnails(api: BullarrApi, offline: OfflineStore, volumeId: Int, total: Int, current: Int, onPick: (Int) -> Unit) {
+    val state = rememberLazyListState()
+    LaunchedEffect(current) {
+        val width = state.layoutInfo.viewportSize.width
+        state.animateScrollToItem(current.coerceIn(0, total - 1), scrollOffset = -(width / 2 - 36 * 3))
+    }
+    LazyRow(
+        Modifier.fillMaxWidth().padding(bottom = 6.dp), state = state,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        itemsIndexed(List(total) { it }, key = { _, i -> i }) { _, index ->
+            val selected = index == current
+            var bmp by remember(volumeId, index) { mutableStateOf(PageCache.cachedThumb(volumeId, index + 1)) }
+            LaunchedEffect(volumeId, index) {
+                if (bmp == null) bmp = try { PageCache.thumb(api, volumeId, index + 1, offline) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { null }
+            }
+            Box(
+                Modifier.height(88.dp).aspectRatio(0.7f).clip(RoundedCornerShape(4.dp))
+                    .background(Color.White.copy(alpha = 0.12f))
+                    .border(if (selected) 2.dp else 0.dp, if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(4.dp))
+                    .clickable { onPick(index) },
+                contentAlignment = Alignment.Center,
+            ) {
+                bmp?.let { Image(it.asImageBitmap(), contentDescription = "Page ${index + 1}", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+                Text(
+                    "${index + 1}", color = Color.White, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.BottomEnd).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 4.dp),
+                )
             }
         }
     }
