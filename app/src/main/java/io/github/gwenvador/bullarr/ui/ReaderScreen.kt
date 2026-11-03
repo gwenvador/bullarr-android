@@ -152,24 +152,26 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
         catch (e: Exception) { error = e.readable() }
     }
 
-    // Tome suivant de la série (possédé) : proposé à la dernière page.
-    var next by remember(target.volumeId) { mutableStateOf<ReaderTarget?>(null) }
+    // Tomes voisins de la série (possédés) : le précédent à la première page, le suivant à la dernière.
+    var neighbours by remember(target.volumeId) { mutableStateOf<Pair<ReaderTarget?, ReaderTarget?>>(null to null) }
     LaunchedEffect(meta?.seriesId) {
         val m = meta ?: return@LaunchedEffect
         val sid = m.seriesId ?: return@LaunchedEffect
-        next = try {
+        neighbours = try {
             if (!online) throw IllegalStateException()
             val d = parseSeriesDetail(api.getObject("api/series/$sid"))
             val owned = d.volumes.filter { it.owned }
             val i = owned.indexOfFirst { it.id == m.volumeId }
-            owned.getOrNull(i + 1)?.takeIf { i >= 0 }?.let { ReaderTarget(it.id, "${d.title} · ${it.label}") }
+            fun at(j: Int) = owned.getOrNull(j)?.takeIf { i >= 0 }?.let { ReaderTarget(it.id, "${d.title} · ${it.label}") }
+            at(i - 1) to at(i + 1)
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) {
-            // Sans réseau : le tome suivant parmi les albums copiés sur le téléphone.
+            // Sans réseau : les tomes voisins parmi les albums copiés sur le téléphone.
             val copies = vm.offline.store.list().map { it.meta }.filter { it.seriesId == sid }
                 .sortedBy { Regex("\\d+").find(it.label.orEmpty())?.value?.toIntOrNull() ?: Int.MAX_VALUE }
             val i = copies.indexOfFirst { it.volumeId == m.volumeId }
-            copies.getOrNull(i + 1)?.takeIf { i >= 0 }?.let { ReaderTarget(it.volumeId, listOfNotNull(it.seriesTitle, it.label).joinToString(" · ")) }
+            fun at(j: Int) = copies.getOrNull(j)?.takeIf { i >= 0 }?.let { ReaderTarget(it.volumeId, listOfNotNull(it.seriesTitle, it.label).joinToString(" · ")) }
+            at(i - 1) to at(i + 1)
         }
     }
 
@@ -179,7 +181,7 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
             // Une clé par tome : passer au suivant repart d'un lecteur neuf.
             m != null -> key(m.volumeId) {
                 val manga = vm.series.firstOrNull { it.id == m.seriesId }?.origin == "Asie"
-                Reader(api, online, vm.offline.store, m, ReadingProgress(context), manga, next, onNext = { vm.reading = it }, onClose = onClose)
+                Reader(api, online, vm.offline.store, m, ReadingProgress(context), manga, neighbours.first, neighbours.second, onOpen = { vm.reading = it }, onClose = onClose)
             }
             else -> {
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -205,7 +207,7 @@ private fun spreadsOf(total: Int, double: Boolean): List<List<Int>> =
 @Composable
 private fun Reader(
     api: BullarrApi, online: Boolean, offline: OfflineStore, meta: ReaderMeta, progress: ReadingProgress,
-    manga: Boolean, next: ReaderTarget?, onNext: (ReaderTarget) -> Unit, onClose: () -> Unit,
+    manga: Boolean, prev: ReaderTarget?, next: ReaderTarget?, onOpen: (ReaderTarget) -> Unit, onClose: () -> Unit,
 ) {
     val total = meta.pageCount
     if (total <= 0) {
@@ -278,7 +280,8 @@ private fun Reader(
     }
 
     fun go(delta: Int) {
-        if (delta > 0 && atEnd) { next?.let(onNext); return }
+        if (delta > 0 && atEnd) { next?.let(onOpen); return }
+        if (delta < 0 && current == 0) { prev?.let(onOpen); return }
         scope.launch {
             if (webtoon) list.animateScrollToItem((current + delta).coerceIn(0, total - 1))
             else pager.animateScrollToPage((pager.currentPage + delta).coerceIn(0, spreads.size - 1))
@@ -407,6 +410,17 @@ private fun Reader(
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Première page : retour au tome précédent.
+            AnimatedVisibility(current == 0 && prev != null && !atEnd, enter = fadeIn(), exit = fadeOut()) {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { prev?.let(onOpen) },
+                    modifier = Modifier.padding(bottom = 12.dp).then(if (bars) Modifier else Modifier.windowInsetsPadding(WindowInsets.navigationBars)),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Black.copy(alpha = 0.7f), contentColor = Color.White),
+                ) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                    Text("Tome précédent : ${prev?.title?.substringAfterLast(" · ") ?: ""}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             // Dernière page : encart « Fin de l'album », avec le tome suivant s'il existe, même barres masquées.
             AnimatedVisibility(atEnd, enter = fadeIn(), exit = fadeOut()) {
                 Column(
@@ -427,7 +441,7 @@ private fun Reader(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = onClose) { Text("Fermer", color = Color.White) }
                         if (next != null) Button(
-                            onClick = { onNext(next) },
+                            onClick = { onOpen(next) },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         ) {
                             Text("Tome suivant : ${next.title.substringAfterLast(" · ")}", maxLines = 1, overflow = TextOverflow.Ellipsis)
