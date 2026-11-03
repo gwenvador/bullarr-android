@@ -45,8 +45,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.FitScreen
-import androidx.compose.material.icons.outlined.FormatTextdirectionLToR
-import androidx.compose.material.icons.outlined.FormatTextdirectionRToL
+import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionLToR
+import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionRToL
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.ViewCarousel
 import androidx.compose.material.icons.outlined.ViewDay
@@ -368,7 +368,7 @@ private fun Reader(
                 // Sens de lecture : gauche → droite ou manga (droite → gauche), mémorisé pour la série.
                 if (!webtoon) IconButton(onClick = { rtl = !rtl; progress.setRtl(meta.seriesId, rtl); barsTick++ }) {
                     Icon(
-                        if (rtl) Icons.Outlined.FormatTextdirectionRToL else Icons.Outlined.FormatTextdirectionLToR,
+                        if (rtl) Icons.AutoMirrored.Outlined.FormatTextdirectionRToL else Icons.AutoMirrored.Outlined.FormatTextdirectionLToR,
                         contentDescription = if (rtl) "Sens manga (droite → gauche)" else "Sens de lecture gauche → droite", tint = Color.White,
                     )
                 }
