@@ -71,7 +71,7 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
 
 - **Bibliothèque** : séries avec drapeau d'origine (BD, Comics, Manga), recherche, **filtres**
   (genre, type, année, dernière mise à jour, votes, nombre de volumes, taille) et **tri**
-  (alphabétique, popularité, date, taille). Toucher un tome ouvre sa fiche (résumé, auteurs,
+  (alphabétique, popularité, date, taille), en liste ou en grille de couvertures. Toucher un tome ouvre sa fiche (résumé, auteurs,
   éditeur, note, fichier) ; la loupe à droite le cherche pour le télécharger. L'onglet
   **Hors ligne** liste les albums copiés sur le téléphone (voir plus bas). Un **appui long** sur
   une série la sélectionne (plusieurs possibles) : télécharger hors ligne, mettre à jour les
@@ -105,8 +105,12 @@ affiche leur nom (infobulle).
 ## Lecture et albums hors ligne
 
 Un tome possédé se lit dans l'app (bouton ▶) : pages en plein écran, zoom au pincement,
-largeur de page ajustable, mode webtoon (défilement vertical), miniatures des pages, reprise
-à la dernière page. Les pages viennent du lecteur de
+largeur de page ajustable, mode webtoon (défilement vertical, zoomable), miniatures des pages,
+sens manga (droite → gauche, par série, d'office pour l'origine Asie), deux pages côte à côte
+en paysage, reprise à la dernière page et bouton « Tome suivant » à la fin de l'album. La page
+lue est envoyée à Bullarr (`POST /api/volumes/<id>/reader/progress`), qui la relaie à Komga
+s'il est relié. Les albums commencés apparaissent en tête de la bibliothèque (« Continuer la
+lecture »). Les pages viennent du lecteur de
 Bullarr (`GET /api/volumes/<id>/reader`, `…/reader/page/<n>`), qui sert des images quel que soit
 le format du fichier (CBZ, CBR, PDF).
 
@@ -116,6 +120,12 @@ plan : ils continuent écran éteint, avec une notification (avancement, **Pause
 **Reprendre**, **Arrêter**). L'onglet **Hors ligne** permet de rechercher, trier, replier par
 série, marquer lu ou non lu, mettre en pause ou reprendre, relancer les erreurs d'un coup et
 supprimer des copies. Il ne contacte jamais le serveur.
+
+## Alertes du téléphone
+
+Configuration → Notifications → « Alertes sur ce téléphone » : imports terminés, validations
+en attente et nouveautés, notifiés même application fermée (vérification environ toutes les
+30 minutes avec WorkManager, seulement avec du réseau). Chaque alerte se coupe séparément.
 
 ## Écrans et routes utilisées
 

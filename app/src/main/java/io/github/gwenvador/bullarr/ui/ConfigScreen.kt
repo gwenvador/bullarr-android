@@ -1,6 +1,7 @@
 package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.material.icons.outlined.PowerSettingsNew
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Badge
@@ -161,13 +162,17 @@ class ConfigEditor(val spec: Integration) {
 }
 
 @Composable
-fun ConfigScreen(vm: AppViewModel, snackbar: SnackbarHostState, specs: List<Integration>, footer: (@Composable () -> Unit)? = null) {
+fun ConfigScreen(
+    vm: AppViewModel, snackbar: SnackbarHostState, specs: List<Integration>,
+    header: (@Composable () -> Unit)? = null, footer: (@Composable () -> Unit)? = null,
+) {
     val api = vm.api ?: return
     val editors = remember(specs) { specs.map { ConfigEditor(it) } }
     LaunchedEffect(api, specs) { editors.forEach { e -> if (e.loaded == null) launch { e.load(api) } } }
     var open by remember(specs) { mutableStateOf(if (specs.size == 1) specs.first().id else null) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        header?.let { item { it() } }
         items(editors, key = { it.spec.id }) { e ->
             ConfigCard(api, snackbar, e, expanded = open == e.spec.id, onToggle = { open = if (open == e.spec.id) null else e.spec.id })
         }
@@ -404,6 +409,47 @@ fun WebSettingsScreen(vm: AppViewModel) {
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+    }
+}
+
+/** Alertes du téléphone (application fermée) : imports, validations, nouveautés. Réglage propre à l'appareil. */
+@Composable
+fun PhoneAlertsCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(cs.surfaceVariant), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = cs.primary)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Alertes sur ce téléphone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Même application fermée, vérifiées environ toutes les 30 minutes.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+            }
+            io.github.gwenvador.bullarr.data.Alerts.Kind.entries.forEach { kind ->
+                var on by remember { mutableStateOf(io.github.gwenvador.bullarr.data.Alerts.isOn(context, kind)) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(kind.label, style = MaterialTheme.typography.bodyLarge)
+                        Text(kind.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    Switch(checked = on, onCheckedChange = { on = it; io.github.gwenvador.bullarr.data.Alerts.set(context, kind, it) })
+                }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) Text(
+                "Les notifications de Bullarr sont bloquées : autorisez-les dans les réglages Android de l'application.",
+                style = MaterialTheme.typography.bodySmall, color = cs.error,
+            )
+            Text(
+                "Les alertes Telegram ci-dessous sont envoyées par le serveur Bullarr ; celles-ci viennent du téléphone.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+            )
         }
     }
 }

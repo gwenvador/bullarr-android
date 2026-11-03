@@ -71,6 +71,8 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         io.github.gwenvador.bullarr.ui.ThemePref.init(this)
+        // Alertes en arrière-plan (imports, validations, nouveautés) selon les réglages du téléphone.
+        io.github.gwenvador.bullarr.data.Alerts.schedule(this)
         setContent { BullarrTheme { BullarrApp() } }
         handleAuthIntent(intent)
     }
@@ -194,7 +196,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     1 -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
                                     2 -> ConfigScreen(vm, snackbar, INDEXERS)
                                     3 -> ConfigScreen(vm, snackbar, CLIENTS)
-                                    4 -> ConfigScreen(vm, snackbar, NOTIFICATIONS)
+                                    4 -> ConfigScreen(vm, snackbar, NOTIFICATIONS, header = { io.github.gwenvador.bullarr.ui.PhoneAlertsCard() })
                                     5 -> ConfigScreen(vm, snackbar, IMPORTS)
                                     6 -> ConfigScreen(vm, snackbar, SEARCH)
                                     7 -> ConfigScreen(vm, snackbar, MONITOR)

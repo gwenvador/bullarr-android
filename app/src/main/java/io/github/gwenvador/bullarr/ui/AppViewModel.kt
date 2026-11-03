@@ -23,16 +23,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var api: BullarrApi? by mutableStateOf(buildApi())
         private set
 
-    private fun buildApi(): BullarrApi? =
-        if (!settings.isConfigured) null
-        else runCatching {
-            if (settings.authMode == "key") BullarrApi(settings.serverUrl, settings.apiKey)
-            else BullarrApi(settings.serverUrl, "", SessionAuth(
-                settings.sessionCookie,
-                if (settings.authMode == "password") settings.username else "",
-                if (settings.authMode == "password") settings.password else "",
-            ) { settings.sessionCookie = it })
-        }.getOrNull()
+    private fun buildApi(): BullarrApi? = io.github.gwenvador.bullarr.data.apiFromSettings(settings)
 
     /** Enregistre le serveur et le mode d'accès ; [cookie] = session déjà ouverte (identifiant ou SSO). */
     fun save(url: String, key: String, mode: String = "key", user: String = "", pass: String = "", cookie: String = "") {
