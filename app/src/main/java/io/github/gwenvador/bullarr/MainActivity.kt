@@ -191,13 +191,14 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                 }
                                 Section.Config -> when (sub) {
                                     0 -> LoginScreen(vm, firstRun = false, onSaved = {})
-                                    1 -> ConfigScreen(vm, snackbar, INDEXERS)
-                                    2 -> ConfigScreen(vm, snackbar, CLIENTS)
-                                    3 -> ConfigScreen(vm, snackbar, NOTIFICATIONS)
-                                    4 -> ConfigScreen(vm, snackbar, IMPORTS)
-                                    5 -> ConfigScreen(vm, snackbar, SEARCH)
-                                    6 -> ConfigScreen(vm, snackbar, MONITOR)
-                                    7 -> ConfigScreen(vm, snackbar, ACCESS)
+                                    1 -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
+                                    2 -> ConfigScreen(vm, snackbar, INDEXERS)
+                                    3 -> ConfigScreen(vm, snackbar, CLIENTS)
+                                    4 -> ConfigScreen(vm, snackbar, NOTIFICATIONS)
+                                    5 -> ConfigScreen(vm, snackbar, IMPORTS)
+                                    6 -> ConfigScreen(vm, snackbar, SEARCH)
+                                    7 -> ConfigScreen(vm, snackbar, MONITOR)
+                                    8 -> ConfigScreen(vm, snackbar, ACCESS)
                                     else -> WebSettingsScreen(vm)
                                 }
                             }

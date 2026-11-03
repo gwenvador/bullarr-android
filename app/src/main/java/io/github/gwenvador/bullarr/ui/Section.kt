@@ -14,5 +14,5 @@ enum class Section(val label: String, val icon: ImageVector, val subs: List<Stri
     Search("Recherche", Icons.Outlined.Search, emptyList()),
     Tracking("Suivi", Icons.Outlined.Timeline, listOf("Activité", "Nouveautés", "Validation", "Historique")),
     Actions("Actions", Icons.Outlined.Build, listOf("Enrichir", "Surveillance", "Vérification")),
-    Config("Configuration", Icons.Outlined.Settings, listOf("Connexion", "Indexeurs", "Clients", "Notifications", "Imports", "Recherche", "Surveillance", "Accès", "Web")),
+    Config("Configuration", Icons.Outlined.Settings, listOf("Connexion", "Apparence", "Indexeurs", "Clients", "Notifications", "Imports", "Recherche", "Surveillance", "Accès", "Web")),
 }

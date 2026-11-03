@@ -2,7 +2,7 @@
 
 Application Android (Kotlin, Jetpack Compose) qui pilote Bullarr à travers son API.
 L'icône reprend le logo de Bullarr (`static/img/bullarr-icon.png`).
-Interface en français, thème clair ou sombre : suit le téléphone, ou forcé dans l'écran du compte (Thème : Système, Clair, Sombre).
+Interface en français, thème clair ou sombre : suit le téléphone, ou forcé dans Configuration → Apparence (Système, Clair, Sombre).
 
 <p align="center">
   <a href="https://gwenvador.github.io/bullarr-android/repo/"><img src="https://gwenvador.github.io/bullarr/fdroid.svg" alt="Installer Bullarr avec F-Droid" height="64"></a>
@@ -93,7 +93,7 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
   Recherche (ordre des sources, extensions, création de séries, recherche automatique),
   Surveillance. Chaque carte a un bouton Enregistrer et, quand l'API le permet, Tester.
   Indexeurs inclut le compte EBDZ et son scraping automatique, Imports le format de
-  renommage, Accès la connexion à Bullarr (mot de passe, SSO). Le dernier onglet, Web,
+  renommage, Accès la connexion à Bullarr (mot de passe, SSO), Apparence le thème de l'app. Le dernier onglet, Web,
   ouvre dans le navigateur ce qui n'est pas dans l'app : forums EBDZ, canaux Telegram,
   clé API, sauvegarde.
 

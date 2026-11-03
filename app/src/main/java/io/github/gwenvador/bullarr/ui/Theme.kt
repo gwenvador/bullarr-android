@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BrightnessAuto
@@ -146,6 +147,21 @@ fun BullarrTheme(content: @Composable () -> Unit) {
         }
     }
     MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
+}
+
+/** Onglet Configuration → Apparence : réglages propres à l'app sur ce téléphone. */
+@Composable
+fun AppearanceScreen() {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ThemePicker()
+        Text(
+            "« Système » suit le mode clair ou sombre du téléphone. Ce réglage est propre à cet appareil.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** Choix du thème : Système / Clair / Sombre. */

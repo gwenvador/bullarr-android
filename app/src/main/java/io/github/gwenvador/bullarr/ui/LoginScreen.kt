@@ -257,7 +257,6 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        ThemePicker(Modifier.padding(top = 8.dp))
         if (!firstRun) {
             OutlinedButton(onClick = { vm.logout() }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
