@@ -63,6 +63,8 @@ import org.json.JSONObject
 import io.github.gwenvador.bullarr.data.objects
 import io.github.gwenvador.bullarr.data.int
 import io.github.gwenvador.bullarr.data.str
+import io.github.gwenvador.bullarr.data.WaitingFile
+import androidx.compose.material.icons.outlined.CollectionsBookmark
 
 /** Rejoue [block] toutes les [intervalMs] tant que l'écran est visible (pas en arrière-plan). */
 @Composable
@@ -182,6 +184,13 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         st.pending.forEach { p -> trackers["p-${p.id}"] = p.id; names["p-${p.id}"] = p.seriesTitle ?: p.title }
         st.pending.forEach { p -> deleters["p-${p.id}"] = { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit } }
     }
+    // Fichiers en attente d'import : sélectionnables seulement s'ils ont un téléchargement suivi.
+    importInfo.counts?.waiting.orEmpty().forEach { w ->
+        val tid = w.trackingId ?: return@forEach
+        trackers["w-${w.key}"] = tid
+        names["w-${w.key}"] = w.filename
+        deleters["w-${w.key}"] = { deleteWaitingFile(api, tid) }
+    }
     if (importing) androidx.compose.material3.AlertDialog(
         onDismissRequest = {}, confirmButton = {},
         title = { Text("Import manuel en cours") },
@@ -246,10 +255,27 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                     IconButton(onClick = { selected = deleters.keys.toList() }) { Icon(Icons.Outlined.SelectAll, contentDescription = "Tout sélectionner") }
                     IconButton(onClick = { confirmImport = true }, enabled = selected.any { it in trackers }) { Icon(Icons.Outlined.MoveToInbox, contentDescription = "Importer maintenant (import manuel)") }
                     IconButton(onClick = { assigning = true }, enabled = selected.any { it in trackers }) { Icon(Icons.Outlined.Link, contentDescription = "Assigner ou corriger la série") }
+                    // Une seule ligne sélectionnée, avec une série : icône pour ouvrir sa fiche.
+                    selected.singleOrNull()?.let { key -> importInfo.counts?.waiting.orEmpty().firstOrNull { "w-${it.key}" == key } }
+                        ?.let { w -> importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)] }
+                        ?.let { d -> d.seriesId?.let { sid -> sid to (d.seriesTitle ?: "") } }
+                        ?.let { (sid, title) ->
+                            IconButton(onClick = { vm.openSeriesById(sid, title) }) { Icon(Icons.Outlined.CollectionsBookmark, contentDescription = "Ouvrir la série") }
+                        }
                     IconButton(onClick = { confirmBatch = true }) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer la sélection", tint = MaterialTheme.colorScheme.error) }
                 }
             }
             importItems(importInfo)
+            importInfo.counts?.waiting.orEmpty().takeIf { it.isNotEmpty() }?.let { waiting ->
+                item { SectionTitle("Fichiers en attente d'import", waiting.size) }
+                items(waiting, key = { "w-${it.key}" }) { w ->
+                    WaitingCard(
+                        w, detail = importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)], selected = "w-${w.key}" in selected,
+                        onLongClick = { if (w.trackingId != null) toggle("w-${w.key}") },
+                        onTap = { if (selected.isNotEmpty() && w.trackingId != null) toggle("w-${w.key}") },
+                    )
+                }
+            }
             error?.let { item { ErrorCard(it, onRetry = { scope.launch { refresh() } }) } }
             val st = status
             if (st == null && error == null) item { EmptyState("Chargement…") }
@@ -423,6 +449,49 @@ private fun ActionButton(label: String, icon: ImageVector, busy: Boolean, onClic
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun WaitingCard(w: WaitingFile, detail: WaitingDetail?, selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth().selectable(selected, onLongClick, onTap),
+        colors = CardDefaults.cardColors(containerColor = if (selected) cs.primaryContainer else cs.surfaceContainer),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(w.filename, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            // Taille et série assignée ; sans détail (pas encore chargé), seule la ligne d'action reste.
+            if (detail != null) Text(
+                listOfNotNull(detail.sizeBytes?.let { formatBytes(it) }, detail.seriesTitle?.let { "Série : $it" } ?: "Aucune série assignée").joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+            )
+            // Raison pour laquelle le fichier n'est pas importé tout seul ; « prêt » s'il n'y en a pas.
+            val reason = detail?.reason
+            Text(
+                when {
+                    w.trackingId == null -> "Pas de téléchargement suivi : à traiter depuis la page Import du site"
+                    reason != null -> "Pas importé : $reason"
+                    else -> "Prêt à importer"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (reason != null) cs.tertiary else cs.onSurfaceVariant,
+            )
+        }
+        }
+    }
+}
+
+/** Supprime le fichier en attente [trackingId] du disque, comme le bouton Supprimer de la page Import. */
+private suspend fun deleteWaitingFile(api: io.github.gwenvador.bullarr.data.BullarrApi, trackingId: Int) {
+    val file = api.getObject("api/import/state").optJSONArray("files").objects()
+        .firstOrNull { it.optJSONObject("destination")?.int("tracking_id") == trackingId }
+        ?: throw io.github.gwenvador.bullarr.data.ApiException("Fichier introuvable sur le disque : rien à supprimer.")
+    api.deleteObject(
+        "api/import/file",
+        JSONObject().put("import_root", file.str("import_root") ?: "").put("relative_path", file.str("relative_path") ?: "")
+            .put("filename", file.str("filename") ?: "").put("client", file.str("client") ?: ""),
+    )
+}
+
 private fun Modifier.selectable(selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit): Modifier =
     this.combinedClickable(onClick = onTap, onLongClick = onLongClick)
 

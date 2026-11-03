@@ -73,6 +73,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import androidx.compose.foundation.combinedClickable
 
 /** Petite icône du type d'événement (import, téléchargement, suppression…). */
 private fun kindIcon(kind: String) = when (kind) {
@@ -111,14 +112,17 @@ private data class Row3(
     val seriesId: Int?,
     val seriesTitle: String?,
     val client: String? = null,
+    /** Opération d'import : sa série se lit dans son détail (les fichiers portent la série). */
+    val operationId: String? = null,
 )
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit) {
+private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit, onLongClick: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxWidth()
-            .clickable(enabled = r.seriesId != null) { r.seriesId?.let { onOpenSeries(it, r.seriesTitle ?: r.title) } }
+            .combinedClickable(onClick = { r.seriesId?.let { onOpenSeries(it, r.seriesTitle ?: r.title) } }, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -157,6 +161,7 @@ private suspend fun loadHistory(api: BullarrApi, seriesId: Int?, errors: Mutable
                             "Import", h.str("file_names") ?: "(aucun fichier)",
                             listOfNotNull(if (h.str("operation_type") == "auto_import") "automatique" else "manuel", counts.ifBlank { null }, statusFr(h.str("status"))).joinToString(" · "),
                             h.str("created_at"), h.str("status") != "failed" && (h.int("files_failed") ?: 0) == 0, null, null,
+                            operationId = h.str("operation_id"),
                         )
                     }
                 }
@@ -231,7 +236,7 @@ private val ACTION_LABELS = mapOf(
     "delete_volume" to "Tome supprimé", "move_volume" to "Tome déplacé", "convert" to "Conversion",
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     val api = vm.api ?: return
@@ -248,6 +253,18 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     LaunchedEffect(api) { if (rows == null) load() }
 
     var kind by rememberSaveable { mutableStateOf<String?>(null) }
+    // Ligne ouverte par appui long : fenêtre avec sa série.
+    var detailRow by remember { mutableStateOf<Row3?>(null) }
+    // Séries des fichiers de l'opération d'import ouverte (vide pour les autres lignes).
+    var opSeries by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
+    LaunchedEffect(detailRow) {
+        opSeries = emptyList()
+        val op = detailRow?.operationId?.takeIf { detailRow?.seriesId == null } ?: return@LaunchedEffect
+        opSeries = try {
+            api.getObject("api/import/history/$op").optJSONObject("details")?.optJSONArray("files").objects()
+                .mapNotNull { f -> f.int("series_id")?.let { it to (f.str("series_title") ?: "(série)") } }.distinct()
+        } catch (e: Exception) { emptyList() }
+    }
     val kinds = rows.orEmpty().groupingBy { it.kind }.eachCount().entries.sortedByDescending { it.value }
     val shown = rows.orEmpty().filter { kind == null || it.kind == kind }
     PullToRefreshBox(isRefreshing = loading && rows != null, onRefresh = { scope.launch { load() } }, modifier = Modifier.fillMaxSize()) {
@@ -269,8 +286,25 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
             errors.forEach { (k, v) -> item(key = "e-$k") { ErrorCard("$k : $v", Modifier.padding(16.dp)) } }
             if (rows != null && shown.isEmpty()) item { EmptyState("Rien dans l'historique") }
             items(shown) { r ->
-                SimpleRow(r, onOpenSeries)
+                SimpleRow(r, onOpenSeries, onLongClick = { detailRow = r })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+    detailRow?.let { r ->
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { detailRow = null }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(r.seriesTitle ?: r.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(r.date?.take(16), r.client).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                r.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                val targets = r.seriesId?.let { listOf(it to (r.seriesTitle ?: r.title)) } ?: opSeries
+                targets.take(5).forEach { (id, title) ->
+                    androidx.compose.material3.Button(
+                        onClick = { detailRow = null; onOpenSeries(id, title) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(if (targets.size > 1) "Ouvrir « $title »" else "Ouvrir la série") }
+                }
+                if (targets.isEmpty()) Text("Aucune série liée à cette ligne.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

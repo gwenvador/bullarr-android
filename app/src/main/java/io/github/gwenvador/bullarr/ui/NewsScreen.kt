@@ -75,6 +75,21 @@ import io.github.gwenvador.bullarr.data.readable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import io.github.gwenvador.bullarr.data.SeriesSummary
+import io.github.gwenvador.bullarr.data.parseLibraries
+import io.github.gwenvador.bullarr.data.parseSeriesList
+import io.github.gwenvador.bullarr.data.setNewsSeries
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.foundation.layout.width
 
 // Onglet 0 = Tout ; les suivants suivent NewsType.
 private val TABS = listOf("Tout") + NewsType.entries.map { it.label }
@@ -88,6 +103,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     var rssNote by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Entrée dont on choisit ou change la série (menu ⋮).
+    var pickFor by remember { mutableStateOf<NewsItem?>(null) }
+    // Entrée dont on crée la série (dialogue d'ajout), puis rattachée à la nouvelle série.
+    var addingFor by remember { mutableStateOf<NewsItem?>(null) }
 
     suspend fun load(type: NewsType, refresh: Boolean) {
         errors.remove(type)
@@ -112,6 +132,25 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
         loading = false
     }
     LaunchedEffect(api) { if (feeds.isEmpty()) loadAll(refresh = false) }
+    pickFor?.let { entry ->
+        NewsSeriesPicker(vm, entry, onDismiss = { pickFor = null }, onAddNew = {
+            addingFor = entry
+            pickFor = null
+        }, onPick = { series ->
+            pickFor = null
+            launchAction(scope, context, "Série « ${series.title} » rattachée", then = { scope.launch { loadAll(refresh = false) } }) {
+                setNewsSeries(api, entry, series.id)
+            }
+        })
+    }
+    addingFor?.let { entry ->
+        SeriesAddDialog(vm, onDismiss = { addingFor = null }, initialQuery = entry.seriesTitle, onAdded = { sid, title ->
+            addingFor = null
+            launchAction(scope, context, "Série « $title » créée et rattachée", then = { scope.launch { loadAll(refresh = false) } }) {
+                setNewsSeries(api, entry, sid)
+            }
+        })
+    }
 
     // Genre (BD / Comics / Manga) d'après l'origine de la fiche Bédéthèque, comme la page web :
     // POST /api/bedetheque/origins, par lots de 100, en redemandant tant que le serveur lit des pages.
@@ -227,7 +266,7 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                     item { EmptyState("Rien de neuf", "Aucune entrée récente.") }
                 }
                 itemsIndexed(items, key = { i, it -> "${it.type}-$i-${it.title.hashCode()}" }) { _, item ->
-                    NewsRow(vm, item, showType = tab == 0, genre = item.bedethequeUrl?.let { genres[it] }, onOpenSeries = onOpenSeries)
+                    NewsRow(vm, item, showType = tab == 0, genre = item.bedethequeUrl?.let { genres[it] }, onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it })
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
@@ -235,8 +274,58 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     }
 }
 
+/** Choix ou changement de la série d'une entrée : toutes les bibliothèques, recherche par titre. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onOpenSeries: (Int, String) -> Unit) {
+private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, onPick: (SeriesSummary) -> Unit, onAddNew: () -> Unit, onDismiss: () -> Unit) {
+    val api = vm.api
+    var all by remember { mutableStateOf<List<SeriesSummary>?>(null) }
+    var failed by remember { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(api) {
+        if (api == null) return@LaunchedEffect
+        try {
+            val libs = parseLibraries(api.getArray("api/libraries"))
+            all = libs.flatMap { lib -> parseSeriesList(api.getArray("api/library/${lib.id}/series")) }.sortedBy { it.title.lowercase() }
+        } catch (e: Exception) {
+            failed = e.readable()
+        }
+    }
+    val terms = normalize(query).split(' ').filter { it.isNotBlank() }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(item.subtitle ?: item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            item.seriesId?.let {
+                Text("Rattachée actuellement à : ${item.seriesTitle}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            OutlinedTextField(
+                value = query, onValueChange = { query = it }, label = { Text("Chercher une série") },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+            failed?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            val list = all
+            if (list == null && failed == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+            TextButton(onClick = onAddNew, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Créer une nouvelle série")
+            }
+            LazyColumn(Modifier.heightIn(max = 480.dp)) {
+                items(list.orEmpty().filter { s -> terms.isEmpty() || terms.all { it in s.searchKey } }.take(200), key = { it.id }) { s ->
+                    ListItem(
+                        headlineContent = { Text(s.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { s.author?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+                        trailingContent = { if (s.id == item.seriesId) Icon(Icons.Outlined.Check, contentDescription = "Série actuelle") },
+                        modifier = Modifier.clickable { onPick(s) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onOpenSeries: (Int, String) -> Unit, onPickSeries: (NewsItem) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val uri = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
@@ -304,6 +393,11 @@ private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: 
                         onClick = { menu = false; dl.quick = item },
                     )
                 }
+                DropdownMenuItem(
+                    text = { Text(if (item.seriesId == null) "Choisir la série" else "Changer la série") },
+                    leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                    onClick = { menu = false; onPickSeries(item) },
+                )
                 item.seriesId?.let { id ->
                     DropdownMenuItem(
                         text = { Text("Ouvrir la série") },
