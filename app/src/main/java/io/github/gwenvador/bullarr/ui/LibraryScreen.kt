@@ -158,7 +158,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     }
                 }
                 // Liste ↔ grille de couvertures.
-                IconButton(onClick = { vm.setLibraryGrid(!vm.libraryGrid) }) {
+                IconButton(onClick = { vm.chooseLibraryGrid(!vm.libraryGrid) }) {
                     Icon(
                         if (vm.libraryGrid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
                         contentDescription = if (vm.libraryGrid) "Afficher en liste" else "Afficher en grille",
