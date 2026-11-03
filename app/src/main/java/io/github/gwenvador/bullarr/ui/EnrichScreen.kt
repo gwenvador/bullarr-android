@@ -126,8 +126,9 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
     val cache = remember { mutableStateMapOf<String, Any>() }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    val added = remember { mutableStateListOf<String>() }
-    var adding by remember { mutableStateOf<String?>(null) }
+    // Ajouts mémorisés dans le ViewModel : l'icône reste « ajoutée » en changeant d'onglet ou de vue.
+    val added = vm.addedBedethequeUrls
+    var adding by remember { mutableStateOf(setOf<String>()) }
     var attempt by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val uri = LocalUriHandler.current
@@ -179,15 +180,16 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
 
     fun add(d: Discovery) {
         val url = d.url ?: return
-        adding = url
+        if (url in adding) return
+        adding = adding + url
         scope.launch {
             try {
                 val lib = parseLibraries(api.getArray("api/libraries")).firstOrNull() ?: throw IllegalStateException("Aucune bibliothèque")
                 val o = api.postObject("api/bedetheque/add-series", JSONObject().put("url", url).put("library_id", lib.id))
-                added += url
+                vm.markAdded(url)
                 snackbar.showSnackbar(if (o.bool("already_exists") == true) "« ${d.title} » est déjà dans ${lib.name}." else "« ${d.title} » ajoutée à ${lib.name}.")
             } catch (e: Exception) { snackbar.showSnackbar(e.readable()) }
-            adding = null
+            adding = adding - url
         }
     }
 
@@ -272,7 +274,7 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
                     if (list.isEmpty()) item { EmptyState("Aucune série") }
                     items(list) { d ->
                         DiscoveryRow(
-                            d, inLibrary = d.inLibrary || d.url in added, busy = adding == d.url,
+                            d, inLibrary = d.inLibrary || d.url in added, busy = d.url in adding,
                             onOpen = {
                                 if (d.seriesId != null) onOpenSeries(d.seriesId, d.title)
                                 else d.url?.let { runCatching { uri.openUri(it) } }

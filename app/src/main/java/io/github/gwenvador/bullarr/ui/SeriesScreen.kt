@@ -782,31 +782,35 @@ private fun AuthorAlbumsSheet(vm: AppViewModel, api: BullarrApi, name: String, l
     LaunchedEffect(link) {
         try { albums = api.getObject("api/bedetheque/authors/albums", mapOf("url" to link)).optJSONArray("albums").objects() } catch (e: Exception) { error = e.readable() }
     }
-    // Ligne en cours d'ajout : son bouton devient un indicateur, pour que l'action se voie tout de suite.
-    var pending by remember { mutableStateOf<Int?>(null) }
+    // Lignes en cours d'ajout (plusieurs possibles) : leur bouton devient un indicateur.
+    var pending by remember { mutableStateOf(setOf<Int>()) }
+    // Déjà en bibliothèque, ou ajoutée pendant la session (mémorisé dans le ViewModel : survit à la fermeture de la fenêtre).
+    fun isAdded(a: JSONObject) = a.optBoolean("already_in_library") || a.str("bedetheque_url")?.let { it in vm.addedBedethequeUrls } == true
     // Sélection multiple : appui long sur un album, puis appuis pour ajouter ou retirer d'autres.
     var selected by remember { mutableStateOf(setOf<Int>()) }
     fun toggle(index: Int) { selected = if (index in selected) selected - index else selected + index }
+    suspend fun add(index: Int, a: JSONObject) {
+        val libraryId = vm.selectedLibrary?.id ?: vm.libraries.firstOrNull()?.id ?: throw ApiException("Aucune bibliothèque disponible")
+        val url = a.str("bedetheque_url")
+        pending = pending + index
+        try {
+            api.postObject("api/bedetheque/add-series", JSONObject().put("url", url).put("library_id", libraryId))
+            url?.let { vm.markAdded(it) }
+        } finally {
+            pending = pending - index
+        }
+    }
     fun addSelected() {
-        val chosen = selected.sorted().mapNotNull { i -> albums?.getOrNull(i)?.takeIf { !it.optBoolean("already_in_library") }?.let { i to it } }
+        val chosen = selected.sorted().mapNotNull { i -> albums?.getOrNull(i)?.takeIf { !isAdded(it) && i !in pending }?.let { i to it } }
         selected = emptySet()
         if (chosen.isEmpty()) return
-        val libraryId = vm.selectedLibrary?.id ?: vm.libraries.firstOrNull()?.id
         launchAction(vm.viewModelScope, context, "${chosen.size} série(s) ajoutée(s)") {
             var failed = 0
             chosen.forEach { (index, a) ->
-                pending = index
-                try {
-                    api.postObject(
-                        "api/bedetheque/add-series",
-                        JSONObject().put("url", a.str("bedetheque_url")).put("library_id", libraryId ?: throw ApiException("Aucune bibliothèque disponible")),
-                    )
-                    albums = albums?.mapIndexed { i, x -> if (i == index) x.apply { put("already_in_library", true) } else x }
-                } catch (e: Exception) {
+                try { add(index, a) }
+                catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     failed++
-                } finally {
-                    pending = null
                 }
             }
             if (failed > 0) throw ApiException("$failed série(s) n'ont pas pu être ajoutée(s)")
@@ -814,19 +818,7 @@ private fun AuthorAlbumsSheet(vm: AppViewModel, api: BullarrApi, name: String, l
     }
     fun addAlbum(index: Int, a: JSONObject) {
         val title = a.str("title") ?: "(sans titre)"
-        val libraryId = vm.selectedLibrary?.id ?: vm.libraries.firstOrNull()?.id
-        launchAction(vm.viewModelScope, context, "« $title » ajoutée") {
-            pending = index
-            try {
-                api.postObject(
-                    "api/bedetheque/add-series",
-                    JSONObject().put("url", a.str("bedetheque_url")).put("library_id", libraryId ?: throw ApiException("Aucune bibliothèque disponible")),
-                )
-                albums = albums?.mapIndexed { i, x -> if (i == index) x.apply { put("already_in_library", true) } else x }
-            } finally {
-                pending = null
-            }
-        }
+        launchAction(vm.viewModelScope, context, "« $title » ajoutée") { add(index, a) }
     }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
         val list = albums
@@ -864,8 +856,8 @@ private fun AuthorAlbumsSheet(vm: AppViewModel, api: BullarrApi, name: String, l
                         Logo("bedetheque", "Ouvrir sur Bédéthèque", 20.dp, Modifier.clickable { runCatching { uri.openUri(u) } }, tip = false)
                     }
                     when {
-                        a.optBoolean("already_in_library") -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Déjà dans la bibliothèque", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(start = 8.dp))
-                        pending == index -> CircularProgressIndicator(Modifier.padding(start = 8.dp).size(20.dp), strokeWidth = 2.dp)
+                        isAdded(a) -> Icon(Icons.Outlined.CheckCircle, contentDescription = "Dans la bibliothèque", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(start = 8.dp))
+                        index in pending -> CircularProgressIndicator(Modifier.padding(start = 8.dp).size(20.dp), strokeWidth = 2.dp)
                         else -> IconButton(onClick = { addAlbum(index, a) }) {
                             Icon(Icons.Outlined.LibraryAdd, contentDescription = "Ajouter cette série", tint = MaterialTheme.colorScheme.primary)
                         }

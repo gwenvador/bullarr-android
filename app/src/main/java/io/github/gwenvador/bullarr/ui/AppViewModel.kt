@@ -157,6 +157,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var libraries by mutableStateOf<List<Library>>(emptyList()); private set
     var selectedLibrary by mutableStateOf<Library?>(null); private set
     var series by mutableStateOf<List<SeriesSummary>>(emptyList()); private set
+
+    /** Séries ajoutées depuis Bédéthèque pendant la session (url) : restent « ajoutées » même si le serveur ne le sait pas encore. */
+    var addedBedethequeUrls by mutableStateOf(setOf<String>()); private set
+    fun markAdded(url: String) { addedBedethequeUrls = addedBedethequeUrls + url }
     var libraryLoading by mutableStateOf(false); private set
     var libraryError by mutableStateOf<String?>(null); private set
     /** Validations manuelles en attente (badge de l'onglet Suivi). */
