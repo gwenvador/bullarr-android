@@ -343,14 +343,20 @@ private fun Reader(
             }
         } else {
             // Les 2 vues suivantes sont déjà composées : le glissement n'attend rien. Manga : la suivante est à gauche.
-            HorizontalPager(
-                pager, Modifier.fillMaxSize(), reverseLayout = rtl, userScrollEnabled = !zoomed,
-                beyondViewportPageCount = 2, key = { spreads[it].first() },
-            ) { index ->
-                PageView(
-                    api, offline, meta.volumeId, spreads[index].map { it + 1 }, isCurrent = index == pager.currentPage,
-                    fitWidth = fitWidth && !double, rtl = rtl,
-                ) { zoomed = it }
+            // Recréé en entier quand on passe d'une à deux pages (rotation) : l'ancien découpage ne doit
+            // plus servir, sinon il demande une vue qui n'existe pas.
+            key(double) {
+                val views = spreads
+                HorizontalPager(
+                    pager, Modifier.fillMaxSize(), reverseLayout = rtl, userScrollEnabled = !zoomed,
+                    beyondViewportPageCount = 2, key = { i -> views.getOrNull(i)?.first() ?: (-1 - i) },
+                ) { index ->
+                    val pages = views.getOrNull(index) ?: return@HorizontalPager
+                    PageView(
+                        api, offline, meta.volumeId, pages.map { it + 1 }, isCurrent = index == pager.currentPage,
+                        fitWidth = fitWidth && !double, rtl = rtl,
+                    ) { zoomed = it }
+                }
             }
         }
 
