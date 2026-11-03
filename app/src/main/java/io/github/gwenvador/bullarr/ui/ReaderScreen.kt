@@ -49,7 +49,7 @@ import androidx.compose.material.icons.automirrored.outlined.FormatTextdirection
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.ViewCarousel
-import androidx.compose.material.icons.outlined.ViewDay
+import androidx.compose.material.icons.outlined.SwipeVertical
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -392,12 +392,16 @@ private fun Reader(
                         modifier = Modifier.alpha(if (doublePref) 1f else 0.45f),
                     )
                 }
-                // Pages ↔ webtoon (lecture en défilement vertical continu).
-                IconButton(onClick = { webtoon = !webtoon; progress.webtoon = webtoon; zoomed = false; barsTick++ }) {
+                // Pages ↔ webtoon (lecture en défilement vertical continu) : libellé explicite, c'est le mode qu'on va prendre.
+                TextButton(
+                    onClick = { webtoon = !webtoon; progress.webtoon = webtoon; zoomed = false; barsTick++ },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+                ) {
                     Icon(
-                        if (webtoon) Icons.Outlined.ViewCarousel else Icons.Outlined.ViewDay,
-                        contentDescription = if (webtoon) "Lire page par page" else "Mode webtoon (défilement vertical)", tint = Color.White,
+                        if (webtoon) Icons.Outlined.ViewCarousel else Icons.Outlined.SwipeVertical,
+                        contentDescription = null, tint = Color.White, modifier = Modifier.padding(end = 4.dp),
                     )
+                    Text(if (webtoon) "Pages" else "Webtoon", color = Color.White, style = MaterialTheme.typography.labelLarge)
                 }
                 // Page entière ↔ pleine largeur (on fait défiler la page vers le bas).
                 if (!webtoon && !double) IconButton(onClick = { fitWidth = !fitWidth; progress.fitWidth = fitWidth; barsTick++ }) {
