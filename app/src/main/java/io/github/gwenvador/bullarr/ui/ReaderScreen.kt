@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.FitScreen
 import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionLToR
 import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionRToL
 import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.ViewCarousel
 import androidx.compose.material.icons.outlined.ViewDay
 import androidx.compose.material3.Button
@@ -406,15 +407,33 @@ private fun Reader(
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            // Dernière page : le tome suivant est proposé, même barres masquées.
-            AnimatedVisibility(atEnd && next != null, enter = fadeIn(), exit = fadeOut()) {
-                Button(
-                    onClick = { next?.let(onNext) },
-                    modifier = Modifier.padding(bottom = 12.dp).then(if (bars) Modifier else Modifier.windowInsetsPadding(WindowInsets.navigationBars)),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            // Dernière page : encart « Fin de l'album », avec le tome suivant s'il existe, même barres masquées.
+            AnimatedVisibility(atEnd, enter = fadeIn(), exit = fadeOut()) {
+                Column(
+                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                        .then(if (bars) Modifier else Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+                        .clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.82f))
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Tome suivant : ${next?.title?.substringAfterLast(" · ") ?: ""}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null, modifier = Modifier.padding(start = 8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
+                        Text("Fin de l'album", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    }
+                    Text(
+                        if (next != null) "Marqué comme lu." else "Marqué comme lu. Pas d'autre tome possédé à suivre dans cette série.",
+                        color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onClose) { Text("Fermer", color = Color.White) }
+                        if (next != null) Button(
+                            onClick = { onNext(next) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        ) {
+                            Text("Tome suivant : ${next.title.substringAfterLast(" · ")}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null, modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
                 }
             }
             AnimatedVisibility(bars, enter = fadeIn(), exit = fadeOut()) {
