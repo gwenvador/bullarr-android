@@ -137,24 +137,6 @@ fun parseTelegram(o: JSONObject): List<NewsItem> = o.optJSONArray("files").objec
     )
 }
 
-/**
- * Rattache une entrée de Nouveautés à une série (ou la change) avec les mêmes routes que le site :
- * RSS et Telegram par nom de fichier ou lien, EBDZ par identifiant de sujet.
- */
-suspend fun setNewsSeries(api: BullarrApi, item: NewsItem, seriesId: Int) {
-    when (item.type) {
-        NewsType.RSS -> api.postObject(
-            "api/ebdz/rss/match-override",
-            JSONObject().put("link", item.raw.str("link") ?: "").put("title", item.raw.str("title") ?: item.title).put("series_id", seriesId),
-        )
-        NewsType.TELEGRAM -> api.postObject(
-            "api/telegram-channels/match-override",
-            JSONObject().put("filename", item.raw.str("filename") ?: item.title).put("series_id", seriesId),
-        )
-        NewsType.EBDZ -> api.postObject("api/series/$seriesId/ebdz-match", JSONObject().put("thread_id", item.raw.str("thread_id") ?: ""))
-    }
-}
-
 fun parseEbdz(o: JSONObject): List<NewsItem> = o.optJSONArray("sessions").objects().flatMap { s ->
     val date = s.str("scraped_at")?.take(16)
     s.optJSONArray("results").objects().map { r ->

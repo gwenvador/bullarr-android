@@ -369,17 +369,9 @@ fun parseImportProgress(o: JSONObject): ImportProgress {
     )
 }
 
-/** Fichier en attente d'import : [trackingId] = téléchargement suivi, sans lui rien ne peut être fait depuis l'app. */
-data class WaitingFile(val key: String, val filename: String, val trackingId: Int?)
+data class ImportPendingCount(val waitingFiles: Int, val awaitingDiscovery: Int)
 
-data class ImportPendingCount(val waitingFiles: Int, val awaitingDiscovery: Int, val waiting: List<WaitingFile> = emptyList())
-
-fun parsePendingCount(o: JSONObject) = ImportPendingCount(
-    o.int("waiting_file_count") ?: 0,
-    o.int("awaiting_discovery_count") ?: 0,
-    // Fichiers en attente d'import (état « waiting » de Bullarr), agissables depuis l'Activité.
-    o.optJSONArray("items").objects().map { WaitingFile(it.str("item_key") ?: it.str("source_path") ?: "", it.str("filename") ?: "(sans nom)", it.int("tracking_id")) },
-)
+fun parsePendingCount(o: JSONObject) = ImportPendingCount(o.int("waiting_file_count") ?: 0, o.int("awaiting_discovery_count") ?: 0)
 
 // --- Formatage --------------------------------------------------------------
 
