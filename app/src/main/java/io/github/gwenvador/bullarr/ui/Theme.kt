@@ -28,6 +28,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import io.github.gwenvador.bullarr.ui.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -151,11 +154,11 @@ fun BullarrTheme(content: @Composable () -> Unit) {
 fun ThemePicker(modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Thème", style = MaterialTheme.typography.titleSmall)
-        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             ThemeMode.entries.forEachIndexed { i, m ->
-                androidx.compose.material3.SegmentedButton(
+                SegmentedButton(
                     selected = ThemePref.mode == m, onClick = { ThemePref.set(m) },
-                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
+                    shape = SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
                     icon = {
                         Icon(
                             when (m) {
