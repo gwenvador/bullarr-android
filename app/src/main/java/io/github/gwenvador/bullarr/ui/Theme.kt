@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BrightnessAuto
 import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material3.Card
@@ -104,9 +107,69 @@ private val Dark = darkColorScheme(
     onErrorContainer = Color(0xFFFFDAD6),
 )
 
+/** Thème choisi dans l'app : suivre le téléphone, toujours clair ou toujours sombre. Mémorisé sur l'appareil. */
+enum class ThemeMode(val label: String) { System("Système"), Light("Clair"), Dark("Sombre") }
+
+object ThemePref {
+    private var prefs: android.content.SharedPreferences? = null
+    var mode by mutableStateOf(ThemeMode.System); private set
+
+    fun init(context: android.content.Context) {
+        if (prefs != null) return
+        prefs = context.applicationContext.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+        mode = runCatching { ThemeMode.valueOf(prefs!!.getString("theme", null) ?: "System") }.getOrDefault(ThemeMode.System)
+    }
+
+    fun set(value: ThemeMode) {
+        mode = value
+        prefs?.edit()?.putString("theme", value.name)?.apply()
+    }
+}
+
 @Composable
 fun BullarrTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+    val dark = when (ThemePref.mode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
+    // Icônes de la barre d'état et de navigation lisibles sur le fond choisi, même si le téléphone est dans l'autre mode.
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) androidx.compose.runtime.SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+    MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
+}
+
+/** Choix du thème : Système / Clair / Sombre. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun ThemePicker(modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Thème", style = MaterialTheme.typography.titleSmall)
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            ThemeMode.entries.forEachIndexed { i, m ->
+                androidx.compose.material3.SegmentedButton(
+                    selected = ThemePref.mode == m, onClick = { ThemePref.set(m) },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
+                    icon = {
+                        Icon(
+                            when (m) {
+                                ThemeMode.System -> Icons.Outlined.BrightnessAuto
+                                ThemeMode.Light -> Icons.Outlined.LightMode
+                                ThemeMode.Dark -> Icons.Outlined.DarkMode
+                            },
+                            contentDescription = null, modifier = Modifier.size(18.dp),
+                        )
+                    },
+                ) { Text(m.label) }
+            }
+        }
+    }
 }
 
 @Composable
