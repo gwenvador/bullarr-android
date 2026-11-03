@@ -70,6 +70,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -293,16 +294,18 @@ private fun Reader(
     var wOffset by remember { mutableStateOf(Offset.Zero) }
     LaunchedEffect(webtoon) { wScale = 1f; wOffset = Offset.Zero }
 
+    // Appui : bords = page précédente / suivante, centre = barres. Toujours la version à jour
+    // (page courante, fin d'album, pager recréé après une rotation), jamais celle du premier affichage.
+    val onTap by rememberUpdatedState { x: Float ->
+        when {
+            x < 0.3f -> go(if (rtl) +1 else -1)
+            x > 0.7f -> go(if (rtl) -1 else +1)
+            else -> bars = !bars
+        }
+    }
     Box(
-        Modifier.fillMaxSize().pointerInput(total, rtl) {
-            detectTapGestures { pos ->
-                val x = pos.x / size.width
-                when {
-                    x < 0.3f -> go(if (rtl) +1 else -1)
-                    x > 0.7f -> go(if (rtl) -1 else +1)
-                    else -> bars = !bars
-                }
-            }
+        Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTapGestures { pos -> onTap(pos.x / size.width) }
         },
     ) {
         if (webtoon) {
