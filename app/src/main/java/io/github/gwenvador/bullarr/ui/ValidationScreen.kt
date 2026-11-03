@@ -1,5 +1,7 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +13,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -50,6 +54,8 @@ fun ValidationScreen(vm: AppViewModel) {
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Entrées dépliées (repliées par défaut) : l'en-tête suffit pour parcourir la liste.
+    var expanded by remember { mutableStateOf(setOf<Int>()) }
 
     suspend fun load() {
         loading = true; error = null
@@ -66,17 +72,28 @@ fun ValidationScreen(vm: AppViewModel) {
             items(reviews.orEmpty(), key = { it.int("id") ?: 0 }) { r ->
                 val id = r.int("id") ?: return@items
                 val candidates = r.optJSONArray("candidates") ?: JSONArray()
-                Card(Modifier.fillMaxWidth()) {
+                val open = id in expanded
+                Card(Modifier.fillMaxWidth().animateContentSize()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { expanded = if (open) expanded - id else expanded + id },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                contentDescription = if (open) "Replier" else "Déplier",
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
                             Column(Modifier.weight(1f)) {
                                 Text(r.str("series_title") ?: "(série inconnue)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                r.str("volume_label")?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
+                                val sub = listOfNotNull(r.str("volume_label"), "${candidates.length()} candidat(s)").joinToString(" · ")
+                                Text(sub, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                             }
                             IconButton(onClick = {
                                 launchAction(scope, context, "Ignoré", then = { scope.launch { load() } }) { api.postObject("api/auto-acquire/reviews/$id/resolve", JSONObject()) }
                             }) { Icon(Icons.Outlined.Close, contentDescription = "Ignorer cette validation") }
                         }
+                        if (open) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         r.str("reason")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         if (r.optInt("series_id", 0) == 0) Text(
                             "Série non associée : à rattacher à Bédéthèque depuis l'interface web.",
@@ -102,6 +119,7 @@ fun ValidationScreen(vm: AppViewModel) {
                                     }
                                 }) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger ce candidat", tint = MaterialTheme.colorScheme.primary) }
                             }
+                        }
                         }
                     }
                 }
