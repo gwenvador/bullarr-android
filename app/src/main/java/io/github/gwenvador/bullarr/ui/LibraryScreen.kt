@@ -15,6 +15,8 @@ import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -84,6 +86,15 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
     val offlineBySeries = remember(vm.offline.version) { vm.offline.downloadedBySeries() }
     val context = androidx.compose.ui.platform.LocalContext.current
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptyList() }
+    // Appui long sur une série : menu pour l'ajouter / la retirer des favoris et de « à lire plus tard ».
+    var menuFor by remember { androidx.compose.runtime.mutableStateOf<SeriesSummary?>(null) }
+    fun setList(sm: SeriesSummary, toReadLater: Boolean? = null, isFavorite: Boolean? = null) {
+        val api = vm.api ?: return
+        launchAction(scope, context, "Liste mise à jour") {
+            ItemActions.setSeriesReadingLists(api, sm.id, toReadLater, isFavorite)
+            vm.updateSeriesRow(sm.id) { row -> row.copy(toReadLater = toReadLater ?: row.toReadLater, isFavorite = isFavorite ?: row.isFavorite) }
+        }
+    }
     fun toggle(id: Int) { selected = if (id in selected) selected - id else selected + id }
     fun batch(ok: String, reload: Boolean, one: suspend (io.github.gwenvador.bullarr.data.BullarrApi, Int) -> Unit) {
         val api = vm.api ?: return
@@ -156,6 +167,34 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 )
             }
         }
+        menuFor?.let { sm ->
+            // Relit la série à jour : le menu reflète l'état courant après chaque action.
+            val cur = vm.series.firstOrNull { it.id == sm.id } ?: sm
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { menuFor = null },
+                title = { Text(cur.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                text = {
+                    Column {
+                        androidx.compose.material3.TextButton(onClick = { menuFor = null; setList(cur, isFavorite = !cur.isFavorite) }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(if (cur.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder, contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text(if (cur.isFavorite) "Retirer des favoris" else "Ajouter aux favoris", Modifier.weight(1f))
+                        }
+                        androidx.compose.material3.TextButton(onClick = { menuFor = null; setList(cur, toReadLater = !cur.toReadLater) }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(if (cur.toReadLater) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text(if (cur.toReadLater) "Retirer de « à lire plus tard »" else "Ajouter à « à lire plus tard »", Modifier.weight(1f))
+                        }
+                        androidx.compose.material3.TextButton(onClick = { menuFor = null; toggle(cur.id) }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Outlined.CheckCircle, contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Sélectionner", Modifier.weight(1f))
+                        }
+                    }
+                },
+                confirmButton = { androidx.compose.material3.TextButton(onClick = { menuFor = null }) { Text("Fermer") } },
+            )
+        }
         if (addSeries) SeriesAddDialog(vm, onDismiss = { addSeries = false }, onAdded = { _, _ -> })
         if (confirmDownload) ConfirmDialog(
             "Télécharger ${selected.size} série(s) hors ligne ?",
@@ -212,7 +251,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     SeriesRow(
                         s, vm.coverUrl(s.coverPath), selected = s.id in selected,
                         offline = (offlineBySeries.first[s.id] ?: 0) + (offlineBySeries.second[s.title] ?: 0),
-                        onLongClick = { toggle(s.id) },
+                        onLongClick = { if (selected.isNotEmpty()) toggle(s.id) else menuFor = s },
                     ) { if (selected.isNotEmpty()) toggle(s.id) else onOpen(s) }
                     HorizontalDivider(Modifier.padding(start = 84.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 }
