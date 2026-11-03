@@ -36,6 +36,13 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -96,180 +103,156 @@ fun SearchScreen(vm: AppViewModel) {
     val dl = vm.downloads
     val focus = LocalFocusManager.current
     val uri = LocalUriHandler.current
-    // Vue par source (repliable) ou tableau unique de tous les résultats.
+    // Tous les résultats en une liste, ou groupés par source (repliables).
     var table by rememberSaveable { mutableStateOf(true) }
     // Recherche Bédéthèque pour ajouter une série (même boîte que le « + » de la bibliothèque).
     var addSeries by remember { mutableStateOf(false) }
-    // Sources masquées (appui sur leur logo) : leurs résultats disparaissent, sans rien relancer.
+    // Sources masquées (appui sur leur puce) : leurs résultats disparaissent, sans rien relancer.
     val hidden = remember { mutableStateMapOf<String, Boolean>() }
     var sortKey by rememberSaveable { mutableStateOf<String?>(null) }
     var sortDesc by rememberSaveable { mutableStateOf(true) }
+    var sortMenu by remember { mutableStateOf(false) }
     var formatFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var onlyConfirmed by rememberSaveable { mutableStateOf(false) }
-    // Un appui sur le logo de la source ouvre la page du résultat (tracker, message Telegram…).
     fun sourceAction(r: SearchResult): (() -> Unit)? = r.sourceLink?.let { link -> { runCatching { uri.openUri(link) } } }
-    fun onSortKey(k: String) { if (sortKey == k) sortDesc = !sortDesc else { sortKey = k; sortDesc = true } }
     fun downloadFor(r: SearchResult, j: DownloadJob) {
         val ctx = s.context
         val vol = if (r.volumeNumber != null) r.volumeLabel else ctx?.volumeLabel
         dl.request(j, ctx?.let { "Rattaché à ${it.seriesTitle}" + (vol?.let { v -> " · $v" } ?: "") }, r.unconfirmed)
     }
+    fun keep(r: SearchResult) = (formatFilter == null || r.format == formatFilter) && (!onlyConfirmed || r.unconfirmed == null)
+    val loading = s.sources.values.any { it == SourceState.Loading }
+    val all = SEARCH_SOURCES.keys.filter { hidden[it] != true }.flatMap { key -> (s.sources[key] as? SourceState.Done)?.results.orEmpty() }
+    val formats = all.mapNotNull { it.format }.distinct().sorted()
+    val rows = sortResults(all.filter { keep(it) }, sortKey, sortDesc)
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Petite flèche retour : revient à l'album recherché, sans carte dans la liste.
+    Column(Modifier.fillMaxSize()) {
+        // En-tête fixe, comme la bibliothèque : champ de recherche, tri, ajout de série.
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Retour à l'album recherché (recherche lancée depuis une fiche).
                 s.context?.let { ctx ->
                     IconButton(onClick = { vm.section = Section.Library; vm.openSeriesById(ctx.seriesId, ctx.seriesTitle) }) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Retour à l'album", modifier = Modifier.size(20.dp))
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Retour à l'album")
                     }
                 }
-                Text("Recherche", style = MaterialTheme.typography.headlineSmall)
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 CompactSearchField(
                     value = s.title, onValueChange = { s.title = it },
-                    placeholder = "Série ou titre…",
+                    placeholder = "Rechercher un album…",
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); s.search() }),
+                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); if (s.title.isNotBlank()) s.search() }),
                     modifier = Modifier.weight(1f),
                 )
                 CompactSearchField(
                     value = s.volume, onValueChange = { v -> s.volume = v.filter { it.isDigit() }.take(4) },
                     placeholder = "Tome", showIcon = false,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); s.search() }),
-                    modifier = Modifier.width(88.dp),
+                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); if (s.title.isNotBlank()) s.search() }),
+                    modifier = Modifier.width(72.dp),
                 )
-                IconButton(onClick = { focus.clearFocus(); s.search() }, enabled = s.title.isNotBlank()) {
-                    Icon(Icons.Outlined.Search, contentDescription = "Rechercher")
+                Box {
+                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier") }
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        SEARCH_SORTS.forEach { k ->
+                            DropdownMenuItem(
+                                text = { Text(k) },
+                                trailingIcon = {
+                                    if (sortKey == k) Icon(
+                                        if (sortDesc) Icons.Outlined.ArrowDownward else Icons.Outlined.ArrowUpward,
+                                        contentDescription = if (sortDesc) "Décroissant" else "Croissant",
+                                    )
+                                },
+                                onClick = { if (sortKey == k) sortDesc = !sortDesc else { sortKey = k; sortDesc = true }; sortMenu = false },
+                            )
+                        }
+                        if (sortKey != null) DropdownMenuItem(text = { Text("Ordre par défaut") }, onClick = { sortKey = null; sortMenu = false })
+                    }
                 }
                 IconButton(onClick = { focus.clearFocus(); addSeries = true }) {
                     Icon(Icons.Outlined.LibraryAdd, contentDescription = "Ajouter une série depuis Bédéthèque")
                 }
             }
-        }
-        if (addSeries) item(key = "add-series-dialog") {
-            SeriesAddDialog(vm, onDismiss = { addSeries = false }, initialQuery = s.title, onAdded = { _, _ -> })
-        }
-        item {
-            // Une seule ligne : logos sans contour, atténués quand la source est désactivée.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            // Sources : appui pour afficher / masquer leurs résultats, appui long pour les activer / désactiver.
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 SEARCH_SOURCES.forEach { (key, label) ->
-                    val count = (s.sources[key] as? SourceState.Done)?.results?.size
-                    val on = s.enabledSources[key] == true
-                    val isHidden = hidden[key] == true
-                    Row(
-                        Modifier.clip(RoundedCornerShape(8.dp))
-                            // Appui : affiche/masque les résultats ; appui long : active/désactive la source dans les recherches.
-                            .combinedClickable(
-                                onClick = {
-                                    val allVisible = SEARCH_SOURCES.keys.all { hidden[it] != true }
-                                    val onlyThis = SEARCH_SOURCES.keys.all { it == key || hidden[it] == true }
-                                    when {
-                                        // Tout affiché : ce logo seul reste (ex. Telegram seul).
-                                        allVisible -> SEARCH_SOURCES.keys.forEach { hidden[it] = it != key }
-                                        // Seul ce logo affiché : on réaffiche tout.
-                                        onlyThis -> SEARCH_SOURCES.keys.forEach { hidden[it] = false }
-                                        else -> hidden[key] = !isHidden
-                                    }
-                                },
-                                onLongClick = { s.enabledSources[key] = !on },
-                            )
-                            .alpha(if (on && !isHidden) 1f else 0.3f)
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        Logo(key, label, 26.dp, tip = false)
-                        if (count != null) Text("$count", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                IconButton(onClick = { table = !table }) {
-                    Icon(Icons.AutoMirrored.Outlined.List, contentDescription = if (table) "Afficher par source" else "Afficher en tableau")
+                    val st = s.sources[key]
+                    SourceChip(
+                        key, label,
+                        count = (st as? SourceState.Done)?.results?.count { keep(it) },
+                        loading = st == SourceState.Loading, failed = st is SourceState.Failed,
+                        enabled = s.enabledSources[key] == true, shown = hidden[key] != true,
+                        onClick = {
+                            val allVisible = SEARCH_SOURCES.keys.all { hidden[it] != true }
+                            val onlyThis = SEARCH_SOURCES.keys.all { it == key || hidden[it] == true }
+                            when {
+                                allVisible -> SEARCH_SOURCES.keys.forEach { hidden[it] = it != key }
+                                onlyThis -> SEARCH_SOURCES.keys.forEach { hidden[it] = false }
+                                else -> hidden[key] = hidden[key] != true
+                            }
+                        },
+                        onLongClick = { s.enabledSources[key] = s.enabledSources[key] != true },
+                    )
                 }
             }
-        }
-        if (s.lastQuery == null) {
-            item { EmptyState("Cherchez un album", "Sur Prowlarr, EBDZ, Telegram, Fourtoutici, VK et Anna's Archive. Depuis une fiche série, touchez un tome pour le chercher.") }
-        }
-        // Vue par type : même en-tête de tri, appliqué à chaque groupe.
-        if (!table && s.lastQuery != null) item(key = "g-head") {
-            SearchTableHeader(sortKey, sortDesc, onSort = { onSortKey(it) })
-        }
-        if (table) {
-            val all = SEARCH_SOURCES.keys.filter { hidden[it] != true }.flatMap { key -> (s.sources[key] as? SourceState.Done)?.results.orEmpty() }
-            val formats = all.mapNotNull { it.format }.distinct().sorted()
-            val rows = sortResults(
-                all.filter { formatFilter == null || it.format == formatFilter }.filter { !onlyConfirmed || it.unconfirmed == null },
-                sortKey, sortDesc,
-            )
-            if (s.lastQuery != null) item(key = "t-tools") {
-                SearchTableTools(
-                    sortKey, sortDesc,
-                    onSort = { onSortKey(it) },
-                    formats = formats, format = formatFilter, onFormat = { formatFilter = it },
-                    onlyConfirmed = onlyConfirmed, onConfirmed = { onlyConfirmed = it },
+            // Filtres : mêmes puces que la bibliothèque.
+            if (s.lastQuery != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !table, onClick = { table = !table }, label = { Text("Par source") })
+                FilterChip(selected = onlyConfirmed, onClick = { onlyConfirmed = !onlyConfirmed }, label = { Text("Tome confirmé") })
+                formats.forEach { f -> FilterChip(selected = formatFilter == f, onClick = { formatFilter = if (formatFilter == f) null else f }, label = { Text(f) }) }
+            }
+            s.lastQuery?.let { q ->
+                Text(
+                    "« $q » · ${rows.size} résultat(s)" + (s.context?.let { " · ${it.seriesTitle}" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (s.sources.values.any { it == SourceState.Loading }) item(key = "t-loading") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            s.sources.forEach { (key, st) ->
-                if (st is SourceState.Failed && hidden[key] != true) item(key = "t-e-$key") { ErrorCard("${SEARCH_SOURCES[key] ?: key} : ${st.message}") }
+        }
+        if (addSeries) SeriesAddDialog(vm, onDismiss = { addSeries = false }, initialQuery = s.title, onAdded = { _, _ -> })
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+            if (s.lastQuery == null) item {
+                EmptyState("Cherchez un album", "Sur Prowlarr, EBDZ, Telegram, Fourtoutici, VK et Anna's Archive. Depuis une fiche série, touchez un tome pour le chercher.")
             }
-            if (rows.isNotEmpty()) {
-                item(key = "t-head") { SearchTableHeader(sortKey, sortDesc, onSort = { onSortKey(it) }) }
+            s.sources.forEach { (key, st) ->
+                if (st is SourceState.Failed && hidden[key] != true) item(key = "e-$key") {
+                    ErrorCard("${SEARCH_SOURCES[key] ?: key} : ${st.message}", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                }
+            }
+            if (table) {
                 items(rows.withIndex().toList(), key = { "t-${it.index}" }) { (_, r) ->
                     val job = r.toJob(s.context)
-                    SearchTableRow(r, sentTo = job?.let { dl.sent[it.key] }, onDownload = job?.let { j -> { downloadFor(r, j) } }, onSource = sourceAction(r))
+                    ResultRow(r, sentTo = job?.let { dl.sent[it.key] }, onDownload = job?.let { j -> { downloadFor(r, j) } }, onOpen = sourceAction(r))
+                    HorizontalDivider(Modifier.padding(start = 68.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                }
+                if (rows.isEmpty() && s.lastQuery != null && !loading) item { EmptyState("Aucun résultat", if (formatFilter != null || onlyConfirmed) "avec ces filtres" else null) }
+            } else SEARCH_SOURCES.forEach { (key, label) ->
+                if (hidden[key] == true) return@forEach
+                val state = s.sources[key] as? SourceState.Done ?: return@forEach
+                val list = sortResults(state.results.filter { keep(it) }, sortKey, sortDesc)
+                val closed = s.collapsed[key] != false
+                item(key = "h-$key") {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { s.collapsed[key] = !closed }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Logo(key, label, 22.dp, Modifier.padding(end = 12.dp), tip = false)
+                        Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text("${list.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            if (closed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                            contentDescription = if (closed) "Déplier $label" else "Replier $label",
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
-            } else if (s.lastQuery != null && s.sources.values.none { it == SourceState.Loading }) {
-                item(key = "t-none") { Text("Aucun résultat.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-        } else SEARCH_SOURCES.forEach { (key, label) ->
-            if (hidden[key] == true) return@forEach
-            val state = s.sources[key] ?: return@forEach
-            val closed = s.collapsed[key] != false
-            item(key = "h-$key") {
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 6.dp)
-                        .clickable { s.collapsed[key] = !closed }
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (closed) Icons.Outlined.ChevronRight else Icons.Outlined.ExpandMore,
-                        contentDescription = if (closed) "Déplier $label" else "Replier $label",
-                        modifier = Modifier.padding(end = 4.dp),
-                    )
-                    Logo(key, label, 22.dp, Modifier.padding(end = 8.dp))
-                    Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    when (state) {
-                        SourceState.Loading -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        is SourceState.Done -> Text("${state.results.size} résultat(s)", style = MaterialTheme.typography.bodySmall)
-                        is SourceState.Failed -> Text("Erreur", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
+                if (!closed) items(list.withIndex().toList(), key = { "r-$key-${it.index}" }) { (_, r) ->
+                    val job = r.toJob(s.context)
+                    ResultRow(r, sentTo = job?.let { dl.sent[it.key] }, onDownload = job?.let { j -> { downloadFor(r, j) } }, onOpen = sourceAction(r))
+                    HorizontalDivider(Modifier.padding(start = 68.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 }
-            }
-            if (!closed) when (state) {
-                is SourceState.Failed -> item(key = "e-$key") { ErrorCard(state.message) }
-                is SourceState.Done -> {
-                    if (state.results.isEmpty()) item(key = "n-$key") {
-                        Text("Aucun résultat.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    items(sortResults(state.results, sortKey, sortDesc).withIndex().toList(), key = { "r-$key-${it.index}" }) { (_, r) ->
-                        val job = r.toJob(s.context)
-                        SearchTableRow(
-                            r,
-                            sentTo = job?.let { dl.sent[it.key] },
-                            onDownload = job?.let { j -> { downloadFor(r, j) } },
-                            onSource = sourceAction(r),
-                        )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    }
-                }
-                SourceState.Loading -> {}
             }
         }
     }
@@ -291,91 +274,65 @@ private fun sortResults(list: List<SearchResult>, key: String?, desc: Boolean): 
     return if (desc) sorted.reversed() else sorted
 }
 
+/** Puce d'une source : logo et nombre de résultats ; atténuée si la source est désactivée ou ses résultats masqués. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SearchTableTools(
-    sortKey: String?, sortDesc: Boolean, onSort: (String) -> Unit,
-    formats: List<String>, format: String?, onFormat: (String?) -> Unit,
-    onlyConfirmed: Boolean, onConfirmed: (Boolean) -> Unit,
+private fun SourceChip(
+    key: String, label: String, count: Int?, loading: Boolean, failed: Boolean,
+    enabled: Boolean, shown: Boolean, onClick: () -> Unit, onLongClick: () -> Unit,
 ) {
-    var menu by remember { mutableStateOf(false) }
+    val cs = MaterialTheme.colorScheme
+    val active = enabled && shown
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        Modifier.height(32.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (active) cs.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+            .border(1.dp, if (active) androidx.compose.ui.graphics.Color.Transparent else cs.outlineVariant, RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .alpha(if (active) 1f else 0.5f)
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier les résultats") }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                SEARCH_SORTS.forEach { k ->
-                    DropdownMenuItem(
-                        text = { Text(if (sortKey == k) "$k ${if (sortDesc) "↓" else "↑"}" else k) },
-                        onClick = { onSort(k); menu = false },
-                    )
-                }
-            }
-        }
-        FilterChip(selected = onlyConfirmed, onClick = { onConfirmed(!onlyConfirmed) }, label = { Text("Tome confirmé") })
-        formats.forEach { f ->
-            FilterChip(selected = format == f, onClick = { onFormat(if (format == f) null else f) }, label = { Text(f) })
+        Logo(key, label, 18.dp, tip = false)
+        when {
+            loading -> CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+            failed -> Text("!", style = MaterialTheme.typography.labelLarge, color = cs.error)
+            count != null -> Text("$count", style = MaterialTheme.typography.labelLarge, color = if (active) cs.onSecondaryContainer else cs.onSurfaceVariant)
+            else -> Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }
 }
 
-private val SRC_W = 28.dp
-private val TOME_W = 56.dp
-private val SIZE_W = 64.dp
-private val ACT_W = 48.dp
-
-@Composable
-private fun SearchTableHeader(sortKey: String?, sortDesc: Boolean, onSort: (String) -> Unit) {
-    val style = MaterialTheme.typography.labelSmall
-    val color = MaterialTheme.colorScheme.onSurfaceVariant
-    // Un appui trie sur la colonne ; l'indicateur donne la colonne et le sens actifs.
-    fun label(key: String, text: String) = if (sortKey == key) "$text ${if (sortDesc) "↓" else "↑"}" else text
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label("Source", "Source"), style = style, color = color, maxLines = 1, modifier = Modifier.width(SRC_W).clickable { onSort("Source") })
-        Text(label("Titre", "Titre"), style = style, color = color, maxLines = 1, modifier = Modifier.weight(1f).clickable { onSort("Titre") })
-        Text(label("Tome", "Tome"), style = style, color = color, maxLines = 1, modifier = Modifier.width(TOME_W).clickable { onSort("Tome") })
-        Text(label("Taille", "Taille"), style = style, color = color, maxLines = 1, modifier = Modifier.width(SIZE_W).clickable { onSort("Taille") })
-        Spacer(Modifier.width(ACT_W))
-    }
-}
-
-@Composable
-private fun SearchTableRow(r: SearchResult, sentTo: String?, onDownload: (() -> Unit)?, onSource: (() -> Unit)?) {
-    val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(SRC_W).clickable(enabled = onSource != null, onClick = { onSource?.invoke() })) { Logo(r.source, SEARCH_SOURCES[r.source] ?: r.source, 20.dp, tip = false) }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(r.name, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            r.unconfirmed?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = cs.tertiary) }
-        }
-        Text(r.volumeLabel.orEmpty(), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.width(TOME_W))
-        Text(formatBytes(r.sizeBytes).orEmpty(), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.width(SIZE_W))
-        if (onDownload != null) IconButton(onClick = onDownload) {
-            Icon(
-                if (sentTo != null) Icons.Outlined.TaskAlt else Icons.Outlined.Download,
-                contentDescription = if (sentTo != null) "Envoyé" else "Télécharger",
-            )
-        }
-        else Spacer(Modifier.width(ACT_W))
-    }
-}
-
+/** Ligne de résultat, dans le style des listes de l'app : logo de la source, titre, détails, téléchargement. */
 @Composable
 private fun ResultRow(r: SearchResult, sentTo: String?, onDownload: (() -> Unit)?, onOpen: (() -> Unit)?) {
     val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = onOpen != null) { onOpen?.invoke() }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(cs.surfaceVariant), contentAlignment = Alignment.Center) {
+            Logo(r.source, SEARCH_SOURCES[r.source] ?: r.source, 22.dp, tip = false)
+        }
+        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(r.name, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            val meta = listOfNotNull(r.volumeLabel, formatBytes(r.sizeBytes), r.detail).joinToString(" · ")
+            Text(r.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val meta = listOfNotNull(
+                r.volumeLabel, formatBytes(r.sizeBytes), r.format, r.seeders?.let { "$it seeds" }, r.date, r.detail,
+            ).distinct().joinToString(" · ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            r.unconfirmed?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.tertiary) }
+            r.unconfirmed?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.tertiary, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             if (sentTo != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 StatusIcon(Icons.AutoMirrored.Outlined.Send, "Envoyé à $sentTo", cs.secondary, 16.dp)
                 Logo(logoKey(sentTo), "Envoyé à $sentTo", 16.dp)
+                Text("Envoyé à $sentTo", style = MaterialTheme.typography.bodySmall, color = cs.secondary)
             }
         }
-        if (onOpen != null) IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = "Voir la source") }
-        if (onDownload != null) IconButton(onClick = onDownload, enabled = sentTo == null) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger") }
+        if (onDownload != null) IconButton(onClick = onDownload) {
+            Icon(
+                if (sentTo != null) Icons.Outlined.TaskAlt else Icons.Outlined.Download,
+                contentDescription = if (sentTo != null) "Envoyé, renvoyer" else "Télécharger",
+                tint = if (sentTo != null) cs.secondary else cs.primary,
+            )
+        }
     }
 }
