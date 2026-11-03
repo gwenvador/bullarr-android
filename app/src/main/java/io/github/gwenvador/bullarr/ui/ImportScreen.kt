@@ -29,9 +29,22 @@ import io.github.gwenvador.bullarr.data.objects
 import io.github.gwenvador.bullarr.data.parseImportProgress
 import io.github.gwenvador.bullarr.data.parsePendingCount
 import io.github.gwenvador.bullarr.data.readable
+import androidx.compose.ui.text.style.TextOverflow
+import io.github.gwenvador.bullarr.data.str
+import io.github.gwenvador.bullarr.data.long
+
+/** Détail d'un fichier en attente : série assignée, raison de l'arrêt automatique, taille. */
+data class WaitingDetail(val seriesTitle: String?, val reason: String?, val sizeBytes: Long?)
 
 /** État de l'import, sondé toutes les 5 s (lecture seule en base, sans scan disque). */
-class ImportInfo(val progress: ImportProgress?, val counts: ImportPendingCount?, val error: String?, val blocked: Map<Int, String> = emptyMap())
+class ImportInfo(
+    val progress: ImportProgress?, val counts: ImportPendingCount?, val error: String?,
+    val blocked: Map<Int, String> = emptyMap(),
+    /** Clé « suivi|nom de fichier » (voir [waitingKey]). */
+    val waitingDetail: Map<String, WaitingDetail> = emptyMap(),
+)
+
+fun waitingKey(trackingId: Int?, filename: String) = "$trackingId|$filename"
 
 @Composable
 fun rememberImportInfo(vm: AppViewModel): ImportInfo {
@@ -50,9 +63,19 @@ fun rememberImportInfo(vm: AppViewModel): ImportInfo {
     }
     // Téléchargements terminés que Bullarr ne peut pas importer seul (dossier d'images en vrac) : id de suivi -> explication.
     var blocked by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var waitingDetail by remember { mutableStateOf<Map<String, WaitingDetail>>(emptyMap()) }
     Polling(15_000, api) {
         if (api != null) runCatching {
             val st = api.getObject("api/import/state")
+            // Série assignée, raison de l'arrêt automatique et taille de chaque fichier suivi.
+            waitingDetail = st.optJSONArray("files").objects().associate { f ->
+                val dest = f.optJSONObject("destination")
+                waitingKey(dest?.int("tracking_id"), f.str("filename") ?: "") to WaitingDetail(
+                    seriesTitle = dest?.str("series_title"),
+                    reason = f.str("auto_import_skip_reason")?.takeIf { it.isNotBlank() },
+                    sizeBytes = f.long("file_size"),
+                )
+            }
             blocked = st.optJSONArray("incompatible_folders").objects().mapNotNull { f ->
                 val id = f.int("pack_download_id") ?: return@mapNotNull null
                 val ext = f.optJSONArray("sample_extensions")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
@@ -62,7 +85,7 @@ fun rememberImportInfo(vm: AppViewModel): ImportInfo {
             }.toMap()
         }
     }
-    return ImportInfo(progress, counts, error, blocked)
+    return ImportInfo(progress, counts, error, blocked, waitingDetail)
 }
 
 /** Import en cours / fichiers en attente, intégrés en tête de l'Activité. */
