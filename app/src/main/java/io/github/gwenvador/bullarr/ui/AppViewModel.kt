@@ -200,6 +200,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var sortDesc by mutableStateOf(libPrefs.getBoolean("sortDesc", LibrarySort.Date.defaultDesc))
         private set
+    /** Bibliothèque en grille de couvertures plutôt qu'en liste ; conservé entre les ouvertures. */
+    var libraryGrid by mutableStateOf(libPrefs.getBoolean("grid", false))
+        private set
+    fun setLibraryGrid(on: Boolean) { libraryGrid = on; libPrefs.edit().putBoolean("grid", on).apply() }
     fun setSort(o: LibrarySort, desc: Boolean) {
         sort = o; sortDesc = desc
         libPrefs.edit().putString("sort", o.name).putBoolean("sortDesc", desc).apply()

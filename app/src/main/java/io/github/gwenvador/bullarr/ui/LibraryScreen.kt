@@ -4,6 +4,9 @@ import androidx.compose.material.icons.outlined.ReportProblem
 import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Book
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
@@ -46,6 +49,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -152,6 +157,13 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                         Icon(Icons.Outlined.FilterList, contentDescription = "Filtres")
                     }
                 }
+                // Liste ↔ grille de couvertures.
+                IconButton(onClick = { vm.setLibraryGrid(!vm.libraryGrid) }) {
+                    Icon(
+                        if (vm.libraryGrid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
+                        contentDescription = if (vm.libraryGrid) "Afficher en liste" else "Afficher en grille",
+                    )
+                }
             }
             if (vm.libraries.size > 1) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,35 +240,114 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
             onRefresh = { vm.loadLibrary(force = true) },
             modifier = Modifier.fillMaxSize(),
         ) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-                vm.libraryError?.let { item {
-                    Column {
+            // Albums commencés : en tête, tant qu'aucune recherche, filtre ni sélection n'est en cours.
+            val recent = remember(vm.progressVersion) { vm.reads.recent() }
+            val showRecent = recent.isNotEmpty() && q.isBlank() && filters.isEmpty && selected.isEmpty()
+            val header: @Composable () -> Unit = {
+                Column {
+                    vm.libraryError?.let {
                         ErrorCard(it, Modifier.padding(16.dp), onRetry = { vm.loadLibrary(force = true) })
                         androidx.compose.material3.TextButton(
                             onClick = { vm.subTab[Section.Library] = 1 },
                             modifier = Modifier.padding(horizontal = 8.dp),
                         ) { Text("Sans réseau ? Ouvrir les albums hors ligne") }
                     }
-                } }
-                if (!vm.libraryLoading && vm.libraryError == null && vm.libraries.isEmpty()) {
-                    item { EmptyState("Aucune bibliothèque", "Créez-en une dans l'interface web de Bullarr.") }
-                }
-                if (filtered.isEmpty() && vm.series.isNotEmpty()) item {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    if (!vm.libraryLoading && vm.libraryError == null && vm.libraries.isEmpty()) {
+                        EmptyState("Aucune bibliothèque", "Créez-en une dans l'interface web de Bullarr.")
+                    }
+                    if (showRecent) ContinueReading(vm, recent)
+                    if (filtered.isEmpty() && vm.series.isNotEmpty()) Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         EmptyState("Aucun résultat", if (q.isNotBlank()) "pour « $q »" + (if (!filters.isEmpty) " avec ces filtres" else "") else "Aucune série ne correspond aux filtres.")
                         if (!filters.isEmpty) androidx.compose.material3.TextButton(onClick = { vm.filters = LibraryFilters() }) { Text("Réinitialiser les filtres") }
                     }
                 }
+            }
+            fun offlineOf(s: SeriesSummary) = (offlineBySeries.first[s.id] ?: 0) + (offlineBySeries.second[s.title] ?: 0)
+            fun longClick(s: SeriesSummary) { if (selected.isNotEmpty()) toggle(s.id) else menuFor = s }
+            fun click(s: SeriesSummary) { if (selected.isNotEmpty()) toggle(s.id) else onOpen(s) }
+            if (vm.libraryGrid) {
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                    androidx.compose.foundation.lazy.grid.GridCells.Adaptive(108.dp), Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    item(key = "header", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { header() }
+                    items(filtered.size, key = { filtered[it].id }) { i ->
+                        val s = filtered[i]
+                        SeriesCell(s, vm.coverUrl(s.coverPath), selected = s.id in selected, offline = offlineOf(s), onLongClick = { longClick(s) }) { click(s) }
+                    }
+                }
+            } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+                item(key = "header") { header() }
                 items(filtered, key = { it.id }) { s ->
-                    SeriesRow(
-                        s, vm.coverUrl(s.coverPath), selected = s.id in selected,
-                        offline = (offlineBySeries.first[s.id] ?: 0) + (offlineBySeries.second[s.title] ?: 0),
-                        onLongClick = { if (selected.isNotEmpty()) toggle(s.id) else menuFor = s },
-                    ) { if (selected.isNotEmpty()) toggle(s.id) else onOpen(s) }
+                    SeriesRow(s, vm.coverUrl(s.coverPath), selected = s.id in selected, offline = offlineOf(s), onLongClick = { longClick(s) }) { click(s) }
                     HorizontalDivider(Modifier.padding(start = 84.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
+    }
+}
+
+/** « Continuer la lecture » : les albums commencés, couverture et avancement ; un appui reprend la lecture. */
+@Composable
+private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.bullarr.data.RecentRead>) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.padding(top = 4.dp, bottom = 8.dp)) {
+        Text("Continuer la lecture", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(recent, key = { it.volumeId }) { r ->
+                val series = vm.series.firstOrNull { it.id == r.seriesId }
+                Column(
+                    Modifier.width(92.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).clickable {
+                        vm.reading = ReaderTarget(r.volumeId, listOfNotNull(r.seriesTitle, r.label).joinToString(" · "))
+                    },
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Cover(series?.coverPath?.let { vm.coverUrl(it) }, 92.dp)
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { ((r.page + 1).toFloat() / r.total.coerceAtLeast(1)).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(), color = cs.primary, trackColor = cs.surfaceVariant,
+                    )
+                    Text(r.seriesTitle ?: r.title ?: "", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(r.label, "p. ${r.page + 1}/${r.total}").joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** Case de la grille : couverture, pastilles (favori, à lire, hors ligne) et titre. */
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun SeriesCell(s: SeriesSummary, cover: String?, selected: Boolean, offline: Int, onLongClick: () -> Unit, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .background(if (selected) cs.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            Cover(cover, maxWidth)
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(4.dp)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .padding(horizontal = 3.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                val white = androidx.compose.ui.graphics.Color.White
+                if (s.isFavorite) Icon(Icons.Filled.Star, contentDescription = "Favori", tint = white, modifier = Modifier.size(14.dp))
+                if (s.toReadLater) Icon(Icons.Filled.Bookmark, contentDescription = "À lire plus tard", tint = white, modifier = Modifier.size(14.dp))
+                if (offline > 0) Icon(Icons.Outlined.OfflinePin, contentDescription = "$offline album(s) hors ligne", tint = white, modifier = Modifier.size(14.dp))
+            }
+            if (selected) Icon(
+                Icons.Outlined.CheckCircle, contentDescription = "Sélectionnée", tint = cs.primary,
+                modifier = Modifier.align(Alignment.Center).size(36.dp).background(cs.surface, androidx.compose.foundation.shape.CircleShape),
+            )
+        }
+        Text(s.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
+        val count = if (s.isOneshot) "One-shot" else s.totalKnown?.let { "${s.ownedTomes}/$it tomes" } ?: "${s.ownedTomes} tome(s)"
+        Text(count, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 4.dp))
     }
 }
 
