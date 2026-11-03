@@ -43,7 +43,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.FitScreen
 import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionLToR
 import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionRToL
@@ -383,9 +382,10 @@ private fun Reader(
                 }
                 // Double page en paysage.
                 if (landscape && !webtoon) IconButton(onClick = { doublePref = !doublePref; progress.doublePage = doublePref; zoomed = false; barsTick++ }) {
-                    Icon(
-                        Icons.Outlined.AutoStories, contentDescription = if (doublePref) "Une page à la fois" else "Deux pages côte à côte",
-                        tint = Color.White, modifier = Modifier.alpha(if (doublePref) 1f else 0.5f),
+                    // « 2× » : deux pages côte à côte ; grisé quand le mode est coupé.
+                    Text(
+                        "2×", color = Color.White, style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.alpha(if (doublePref) 1f else 0.45f),
                     )
                 }
                 // Pages ↔ webtoon (lecture en défilement vertical continu).
