@@ -105,7 +105,8 @@ affiche leur nom (infobulle).
 ## Lecture et albums hors ligne
 
 Un tome possédé se lit dans l'app (bouton ▶) : pages en plein écran, zoom au pincement,
-largeur de page ajustable, reprise à la dernière page. Les pages viennent du lecteur de
+largeur de page ajustable, mode webtoon (défilement vertical), miniatures des pages, reprise
+à la dernière page. Les pages viennent du lecteur de
 Bullarr (`GET /api/volumes/<id>/reader`, `…/reader/page/<n>`), qui sert des images quel que soit
 le format du fichier (CBZ, CBR, PDF).
 
