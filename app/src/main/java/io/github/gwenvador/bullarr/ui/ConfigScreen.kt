@@ -1,6 +1,36 @@
 package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.material.icons.outlined.PowerSettingsNew
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.Badge
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.FormatListNumbered
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.MoveToInbox
+import androidx.compose.material.icons.outlined.Numbers
+import androidx.compose.material.icons.outlined.Percent
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Sell
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.Title
+import androidx.compose.material.icons.outlined.TrackChanges
+import androidx.compose.material.icons.outlined.VpnKey
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -145,6 +175,53 @@ fun ConfigScreen(vm: AppViewModel, snackbar: SnackbarHostState, specs: List<Inte
     }
 }
 
+/** Icône d'un réglage sans logo de marque. */
+private fun configIcon(id: String): ImageVector = when (id) {
+    "rename" -> Icons.Outlined.DriveFileRenameOutline
+    "import" -> Icons.Outlined.MoveToInbox
+    "order" -> Icons.Outlined.FormatListNumbered
+    "blocked" -> Icons.Outlined.Block
+    "series" -> Icons.Outlined.CreateNewFolder
+    "auto" -> Icons.Outlined.Autorenew
+    "monitor" -> Icons.Outlined.TrackChanges
+    "login" -> Icons.Outlined.Lock
+    else -> Icons.Outlined.Tag
+}
+
+/** Icône en tête d'un champ texte, d'après sa clé (rien quand aucune ne s'impose). */
+private fun fieldIcon(f: Field): ImageVector? {
+    val k = f.key.substringAfterLast('.')
+    return when {
+        f is FSecret -> if ("key" in k) Icons.Outlined.VpnKey else if ("token" in k || "secret" in k) Icons.Outlined.Key else Icons.Outlined.Lock
+        k == "url" || k == "base_url" || k == "issuer" -> Icons.Outlined.Link
+        k == "host" -> Icons.Outlined.Dns
+        k == "port" -> Icons.Outlined.Numbers
+        k == "username" -> Icons.Outlined.Person
+        k.endsWith("category") -> Icons.Outlined.Sell
+        k.endsWith("template") -> Icons.Outlined.Title
+        k == "client_id" -> Icons.Outlined.Badge
+        k == "chat_id" -> Icons.Outlined.Tag
+        k == "scopes" -> Icons.Outlined.Checklist
+        "interval" in k -> Icons.Outlined.Schedule
+        "percent" in k -> Icons.Outlined.Percent
+        "extensions" in k -> Icons.Outlined.Description
+        else -> null
+    }
+}
+
+/** Pastille en tête de carte : logo de la marque, sinon une icône. */
+@Composable
+private fun ConfigBadge(spec: Integration) {
+    val logo = logoKey(spec.title) ?: logoKey(spec.id)
+    Box(
+        Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (hasLogo(logo)) Logo(logo, spec.title, 26.dp, tip = false)
+        else Icon(configIcon(spec.id), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigEditor, expanded: Boolean, onToggle: () -> Unit) {
@@ -156,6 +233,8 @@ private fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigEd
 
     Card(Modifier.fillMaxWidth().animateContentSize(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            ConfigBadge(e.spec)
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(e.spec.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 val status = when {
@@ -215,21 +294,25 @@ private fun FieldEditor(f: Field, e: ConfigEditor, o: JSONObject) {
         }
         is FText -> ClearableField(
             e.values[f.key] as? String ?: "", { e.values[f.key] = it }, Modifier.fillMaxWidth(), label = f.label, placeholder = f.hint,
+            leadingIcon = fieldIcon(f)?.let { { Icon(it, contentDescription = null) } },
             keyboardOptions = KeyboardOptions(keyboardType = if (f.url) KeyboardType.Uri else KeyboardType.Text),
         )
         is FNumber -> ClearableField(
             e.values[f.key] as? String ?: "", { v -> e.values[f.key] = v.filter { it.isDigit() } }, Modifier.fillMaxWidth(), label = f.label,
+            leadingIcon = fieldIcon(f)?.let { { Icon(it, contentDescription = null) } },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
         is FList -> ClearableField(
             e.values[f.key] as? String ?: "", { e.values[f.key] = it }, Modifier.fillMaxWidth(), label = f.label, placeholder = f.hint,
             supportingText = "Séparées par des virgules.",
+            leadingIcon = fieldIcon(f)?.let { { Icon(it, contentDescription = null) } },
         )
         is FSecret -> {
             var show by remember { mutableStateOf(false) }
             ClearableField(
                 e.values[f.key] as? String ?: "", { e.values[f.key] = it }, Modifier.fillMaxWidth(), label = f.label,
                 placeholder = if (secretIsSet(f, o)) "Enregistré — laisser vide pour le garder" else null,
+                leadingIcon = fieldIcon(f)?.let { { Icon(it, contentDescription = null) } },
                 visualTransformation = if (show) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailing = {
@@ -287,6 +370,18 @@ private val WEB_SETTINGS = listOf(
 )
 
 @Composable
+private fun WebSettingIcon(label: String) {
+    val logo = logoKey(label.substringBefore(' '))
+    Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+        when {
+            hasLogo(logo) -> Logo(logo, label, 22.dp, tip = false)
+            "Clé" in label -> Icon(Icons.Outlined.VpnKey, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            else -> Icon(Icons.Outlined.Backup, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
 fun WebSettingsScreen(vm: AppViewModel) {
     val uri = LocalUriHandler.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
@@ -303,6 +398,8 @@ fun WebSettingsScreen(vm: AppViewModel) {
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                WebSettingIcon(label)
+                Spacer(Modifier.width(16.dp))
                 Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
