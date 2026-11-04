@@ -15,8 +15,11 @@ sealed interface Field {
 data class FText(override val key: String, override val label: String, val hint: String? = null, val url: Boolean = false) : Field
 data class FNumber(override val key: String, override val label: String) : Field
 data class FSwitch(override val key: String, override val label: String, val help: String? = null) : Field
-/** Secret : jamais relu en clair. Laissé vide = inchangé ; le serveur ne l'écrase que s'il est renseigné. */
-data class FSecret(override val key: String, override val label: String) : Field
+/**
+ * Secret : jamais relu en clair. Laissé vide = inchangé ; le serveur ne l'écrase que s'il est renseigné.
+ * [keepMasked] : pour un serveur qui efface le secret reçu vide (ntfy), renvoie la valeur masquée lue.
+ */
+data class FSecret(override val key: String, override val label: String, val keepMasked: Boolean = false) : Field
 data class FChoice(override val key: String, override val label: String, val options: List<Pair<String, String>>) : Field
 /** Liste ordonnée dont seul l'ordre se règle (priorité des sources). */
 data class FOrder(override val key: String, override val label: String, val names: Map<String, String>, val help: String? = null) : Field
@@ -25,7 +28,8 @@ data class FMulti(override val key: String, override val label: String, val opti
 /** Liste de valeurs saisies séparées par des virgules. */
 data class FList(override val key: String, override val label: String, val hint: String? = null) : Field
 
-data class TestCall(val post: Boolean, val path: String, val label: String = "Tester", val note: String? = null)
+/** [sendConfig] : le test reçoit la configuration enregistrée (ntfy teste les valeurs envoyées). */
+data class TestCall(val post: Boolean, val path: String, val label: String = "Tester", val note: String? = null, val sendConfig: Boolean = false)
 
 data class Integration(
     val id: String,
@@ -119,6 +123,23 @@ val INDEXERS = listOf(
         TestCall(false, "api/vk/test"),
         info = { c -> c.optJSONObject("index")?.int("series")?.let { "Index : $it séries" } },
     ),
+)
+
+/** Canal ntfy du serveur (topic ntfy.sh ou auto-hébergé), comme la carte ntfy de la page de réglages. */
+val NTFY_CHANNEL = Integration(
+    "ntfy", "ntfy", "api/ntfy/config",
+    listOf(
+        ENABLED,
+        FText("server_url", "Serveur", "https://ntfy.sh", url = true),
+        FText("topic", "Topic", "ex : bullarr-7f3k9q"),
+        FChoice("auth", "Authentification", listOf("none" to "Aucune", "token" to "Jeton d'accès", "basic" to "Identifiant et mot de passe")),
+        FSecret("token", "Jeton d'accès", keepMasked = true),
+        FText("username", "Identifiant"),
+        FSecret("password", "Mot de passe", keepMasked = true),
+        FChoice("priority", "Priorité", listOf("1" to "Minimale", "2" to "Basse", "3" to "Normale", "4" to "Haute", "5" to "Urgente")),
+    ),
+    TestCall(true, "api/ntfy/test", label = "Envoyer une notification test", note = "Envoie une vraie notification au topic enregistré.", sendConfig = true),
+    help = "Sur ntfy.sh, un topic est public : choisissez un nom difficile à deviner, puis abonnez-vous-y dans l'app ntfy.",
 )
 
 val NOTIFICATIONS = listOf(
@@ -234,7 +255,7 @@ fun buildPayload(spec: Integration, fresh: JSONObject, initial: Map<String, Any>
         val now = edited[f.key] ?: continue
         val changed = now != initial[f.key]
         when (f) {
-            is FSecret -> body.putPath(f.key, if (changed) now as String else "")
+            is FSecret -> body.putPath(f.key, if (changed) now as String else if (f.keepMasked) (fresh.getPath(f.key) ?: "") else "")
             else -> if (!changed) continue else when (f) {
                 is FSwitch -> body.putPath(f.key, now as Boolean)
                 is FNumber -> {

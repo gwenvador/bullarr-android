@@ -26,34 +26,15 @@ fun apiFromSettings(settings: Settings): BullarrApi? =
     }.getOrNull()
 
 /**
- * Notifications de Bullarr sur le téléphone, reçues en instantané par ntfy (voir [Push]) :
- * les mêmes évènements que les notifications Telegram de la page de réglages web.
+ * Notifications de Bullarr sur le téléphone, reçues en instantané par ntfy (UnifiedPush, voir [Push]).
  */
 object Alerts {
     private const val CHANNEL = "alerts"
 
-    private fun prefs(context: Context) = context.getSharedPreferences("alerts", Context.MODE_PRIVATE)
-
-    /** Évènements notifiables, comme sur la page web (Configuration → Notifications) ; [telegramKey] : réglage Telegram du serveur. */
-    enum class Kind(val key: String, val pushKind: String, val label: String, val detail: String, val telegramKey: String) {
-        ImportCompleted(
-            "imports", "import_completed", "Import effectué",
-            "Quand un import (manuel ou automatique) déplace des fichiers dans la bibliothèque.", "notify_import_completed",
-        ),
-        ImportAvailable(
-            "import_available", "import_available", "Import disponible",
-            "Quand de nouveaux fichiers apparaissent dans les répertoires surveillés (nécessite l'import automatique, onglet Imports).", "notify_import_available",
-        ),
-    }
-
-    fun isOn(context: Context, kind: Kind) = prefs(context).getBoolean("on_${kind.key}", true)
-
-    fun set(context: Context, kind: Kind, on: Boolean) { prefs(context).edit().putBoolean("on_${kind.key}", on).apply() }
-
     private fun channel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Alertes Bullarr", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Imports effectués et fichiers disponibles pour l'import."
+                description = "Évènements cochés dans Configuration → Notifications (imports, surveillance, mises à jour…)."
             },
         )
     }

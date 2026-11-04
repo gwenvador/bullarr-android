@@ -137,15 +137,18 @@ supprimer des copies. Il ne contacte jamais le serveur.
 
 ## Notifications
 
-Configuration → Notifications reprend la page de réglages web : un tableau avec, pour **Import
-effectué** et **Import disponible**, une case **ntfy** (ce téléphone) et une case **Telegram**
-(bot du serveur, enregistrée directement sur Bullarr), puis la configuration de ntfy et du bot.
+Configuration → Notifications reprend la page de réglages web de Bullarr :
 
-Sur le téléphone, les notifications arrivent en instantané par [ntfy](https://f-droid.org/packages/io.heckel.ntfy/)
-(distributeur [UnifiedPush](https://unifiedpush.org/)) : avec ntfy installé, l'interrupteur
-« Notifications instantanées » abonne le téléphone et Bullarr pousse chaque évènement dès qu'il
-a lieu, sans interroger le serveur ni vider la batterie. Le serveur doit connaître les routes
-`/api/push/*` (Bullarr avec les notifications push) ; ntfy.sh ou un ntfy auto-hébergé conviennent.
+- **Événements** : le tableau du serveur (`GET`/`POST /api/notifications/events`), une ligne par
+  type (téléchargement ajouté, import effectué, import disponible, surveillance, validation en
+  attente, mise à jour disponible), une case **Telegram** et une case **ntfy**, enregistrées aussitôt.
+- **Canaux** : les cartes Telegram (bot) et ntfy (serveur, topic, authentification, priorité,
+  notification test), comme sur le site.
+- **Application Android** : notifications instantanées de ce téléphone. Avec l'app
+  [ntfy](https://f-droid.org/packages/io.heckel.ntfy/) installée (distributeur
+  [UnifiedPush](https://unifiedpush.org/)), l'interrupteur abonne le téléphone
+  (`POST /api/push/register`) ; Bullarr y pousse chaque évènement dès qu'il a lieu, sans que le
+  téléphone interroge le serveur. `POST /api/push/test` envoie un essai.
 
 ## Écrans et routes utilisées
 

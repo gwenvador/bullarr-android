@@ -151,7 +151,7 @@ class ConfigEditor(val spec: Integration) {
         val t = spec.test ?: return
         testing = true; message = null
         try {
-            val o = if (t.post) api.postObject(t.path, JSONObject()) else api.getObject(t.path)
+            val o = if (t.post) api.postObject(t.path, if (t.sendConfig) api.getObject(spec.path) else JSONObject()) else api.getObject(t.path)
             message = o.str("message")?.replace(Regex("^[^\\p{L}\\p{N}]+"), "")
                 ?: o.str("topics")?.let { "Forum joignable : $it sujets." } ?: "Connexion réussie."
             messageIsError = false

@@ -43,31 +43,41 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import io.github.gwenvador.bullarr.data.Alerts
 import io.github.gwenvador.bullarr.data.NOTIFICATIONS
 import io.github.gwenvador.bullarr.data.readable
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-private val COL_W = 72.dp
+private val COL_W = 76.dp
+
+/** Tableau « Événements » du serveur : une ligne par type, une case par canal (comme la page de réglages web). */
+private data class NotifEvent(val id: String, val label: String, val description: String)
+private data class NotifChannel(val enabled: Boolean, val configured: Boolean, val events: Map<String, Boolean>)
 
 /**
- * Onglet Configuration → Notifications, comme la page de réglages web : en haut un tableau
- * « quel évènement, vers quelle destination » avec des cases, puis la configuration de chaque
- * destination (ce téléphone, le bot Telegram du serveur).
+ * Onglet Configuration → Notifications, comme la page de réglages web : le tableau « Événements »
+ * (une ligne par type, une case Telegram et une case ntfy, enregistrées aussitôt), puis les cartes
+ * Telegram et ntfy, et la carte « Application Android » des notifications instantanées du téléphone.
  */
 @Composable
 fun NotificationsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val api = vm.api ?: return
     val telegram = remember { ConfigEditor(NOTIFICATIONS.first()) }
-    LaunchedEffect(api) { if (telegram.loaded == null) telegram.load(api) }
-    var telegramOpen by remember { mutableStateOf(false) }
+    val ntfy = remember { ConfigEditor(io.github.gwenvador.bullarr.data.NTFY_CHANNEL) }
+    LaunchedEffect(api) {
+        if (telegram.loaded == null) launch { telegram.load(api) }
+        if (ntfy.loaded == null) launch { ntfy.load(api) }
+    }
+    var open by remember { mutableStateOf<String?>(null) }
+    // Une carte enregistrée (canal activé, topic…) change l'état affiché en tête du tableau.
+    val reload = remember(telegram.loaded, ntfy.loaded) { Any() }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { NotificationTable(vm, telegram) }
-        item { SectionTitle("ntfy (notifications sur ce téléphone)") }
+        item { EventsTable(vm, reload) }
+        item { SectionTitle("Canaux") }
+        item { ConfigCard(api, snackbar, telegram, expanded = open == "telegram", onToggle = { open = if (open == "telegram") null else "telegram" }) }
+        item { ConfigCard(api, snackbar, ntfy, expanded = open == "ntfy", onToggle = { open = if (open == "ntfy") null else "ntfy" }) }
+        item { SectionTitle("Application Android (ce téléphone)") }
         item { PhoneDeliveryCard(vm) }
-        item { SectionTitle("Telegram (bot du serveur)") }
-        item { ConfigCard(api, snackbar, telegram, expanded = telegramOpen, onToggle = { telegramOpen = !telegramOpen }) }
     }
 }
 
@@ -77,101 +87,118 @@ private fun SectionTitle(text: String) {
         modifier = Modifier.padding(start = 4.dp, top = 8.dp))
 }
 
-/** Tableau évènements × destinations. Colonne ntfy : réglage de ce téléphone ; colonne Telegram : réglage du serveur. */
 @Composable
-private fun NotificationTable(vm: AppViewModel, telegram: ConfigEditor) {
-    val context = LocalContext.current
+private fun EventsTable(vm: AppViewModel, reload: Any) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val phone = remember { mutableStateMapOf<Alerts.Kind, Boolean>().apply { Alerts.Kind.entries.forEach { put(it, Alerts.isOn(context, it)) } } }
-    // Cases Telegram : lues dans la configuration du serveur, enregistrées dès qu'on les coche.
-    val tg = remember { mutableStateMapOf<String, Boolean>() }
-    var tgBusy by remember { mutableStateOf<String?>(null) }
-    var tgError by remember { mutableStateOf<String?>(null) }
-    val loaded = telegram.loaded
-    LaunchedEffect(loaded) {
-        loaded ?: return@LaunchedEffect
-        Alerts.Kind.entries.forEach { tg[it.telegramKey] = loaded.optBoolean(it.telegramKey, true) }
-    }
-    val tgEnabled = loaded?.optBoolean("enabled", false) == true
-    @Suppress("UNUSED_VARIABLE") val pushState = io.github.gwenvador.bullarr.data.Push.version
-    val instant = io.github.gwenvador.bullarr.data.Push.active(context)
+    var events by remember { mutableStateOf<List<NotifEvent>?>(null) }
+    val channels = remember { mutableStateMapOf<String, NotifChannel>() }
+    var devices by remember { mutableStateOf(0) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    val api = vm.api
 
-    fun setTelegram(key: String, value: Boolean) {
-        val api = vm.api ?: return
-        tgBusy = key; tgError = null
+    LaunchedEffect(api, reload) {
+        api ?: return@LaunchedEffect
+        try {
+            val o = api.getObject("api/notifications/events")
+            val list = o.optJSONArray("events")
+            events = (0 until (list?.length() ?: 0)).mapNotNull { k ->
+                list?.optJSONObject(k)?.let { NotifEvent(it.optString("id"), it.optString("label"), it.optString("description")) }
+            }
+            val ch = o.optJSONObject("channels")
+            listOf("telegram", "ntfy").forEach { name ->
+                val c = ch?.optJSONObject(name) ?: return@forEach
+                val ev = c.optJSONObject("events")
+                channels[name] = NotifChannel(
+                    c.optBoolean("enabled"), c.optBoolean("configured"),
+                    ev?.keys()?.asSequence()?.associateWith { ev.optBoolean(it) }.orEmpty(),
+                )
+            }
+            devices = o.optInt("push_devices")
+            error = null
+        } catch (e: Exception) {
+            val msg = e.readable()
+            error = if ("404" in msg) "Ce serveur Bullarr n'a pas encore le tableau des notifications : mettez-le à jour." else msg
+        }
+    }
+
+    fun toggle(channel: String, kind: String, value: Boolean) {
+        val a = vm.api ?: return
+        val before = channels[channel] ?: return
+        channels[channel] = before.copy(events = before.events + (kind to value))
+        busy = "$channel/$kind"
         scope.launch {
-            try {
-                // Relit le serveur pour ne changer que cette case (jeton inchangé : champ vide).
-                val fresh = api.getObject("api/telegram/config")
-                fresh.put(key, value).put("bot_token", "")
-                api.postObject("api/telegram/config", fresh)
-                tg[key] = value
-            } catch (e: Exception) { tgError = e.readable() }
-            tgBusy = null
+            try { a.postObject("api/notifications/events", JSONObject().put(channel, JSONObject().put(kind, value))) }
+            catch (e: Exception) { channels[channel] = before; error = e.readable() }
+            busy = null
+        }
+    }
+
+    @Composable
+    fun ChannelHead(name: String, label: String, logo: String) {
+        val c = channels[name]
+        Column(Modifier.width(COL_W).alpha(if (c?.enabled == true) 1f else 0.55f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Logo(logo, label, 20.dp, tip = false)
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                when { c == null -> ""; c.enabled -> "activé"; c.configured -> "désactivé"; else -> "à configurer" },
+                style = MaterialTheme.typography.labelSmall, color = if (c?.enabled == true) cs.primary else cs.onSurfaceVariant,
+            )
         }
     }
 
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
         Column(Modifier.padding(vertical = 12.dp)) {
-            Text("Notifications à envoyer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
-            Text("Cochez, pour chaque évènement, où le recevoir.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
-            // En-tête : destinations.
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Évènement", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
-                Column(Modifier.width(COL_W).alpha(if (instant) 1f else 0.5f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Logo("ntfy", "ntfy", 20.dp, tip = false)
-                    Text("ntfy", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                }
-                Column(Modifier.width(COL_W).alpha(if (tgEnabled) 1f else 0.5f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Logo("telegram", "Telegram", 20.dp, tip = false)
-                    Text("Telegram", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                }
-            }
-            HorizontalDivider(color = cs.outlineVariant)
-            Alerts.Kind.entries.forEachIndexed { i, kind ->
-                Row(
-                    Modifier.fillMaxWidth().background(if (i % 2 == 1) cs.surfaceVariant.copy(alpha = 0.35f) else androidx.compose.ui.graphics.Color.Transparent)
-                        .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(kind.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text(kind.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Text("Événements", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
+            Text(
+                "Choisissez ce que chaque canal reçoit. Un canal se configure et s'active dans sa carte, plus bas.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            val list = events
+            when {
+                error != null && list == null -> Text(error!!, style = MaterialTheme.typography.bodySmall, color = cs.error, modifier = Modifier.padding(16.dp))
+                list == null -> CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp), strokeWidth = 2.dp)
+                else -> {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Événement", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        ChannelHead("telegram", "Telegram", "telegram")
+                        ChannelHead("ntfy", "ntfy", "ntfy")
                     }
-                    Box(Modifier.width(COL_W).alpha(if (instant) 1f else 0.5f), contentAlignment = Alignment.Center) {
-                        Checkbox(checked = phone[kind] == true, onCheckedChange = { on -> phone[kind] = on; Alerts.set(context, kind, on) })
+                    HorizontalDivider(color = cs.outlineVariant)
+                    list.forEachIndexed { i, ev ->
+                        Row(
+                            Modifier.fillMaxWidth().background(if (i % 2 == 1) cs.surfaceVariant.copy(alpha = 0.35f) else androidx.compose.ui.graphics.Color.Transparent)
+                                .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(ev.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                if (ev.description.isNotBlank()) Text(ev.description, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                            }
+                            listOf("telegram", "ntfy").forEach { name ->
+                                val c = channels[name]
+                                Box(Modifier.width(COL_W).alpha(if (c?.enabled == true) 1f else 0.55f), contentAlignment = Alignment.Center) {
+                                    if (busy == "$name/${ev.id}") CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    else Checkbox(checked = c?.events?.get(ev.id) == true, enabled = c != null, onCheckedChange = { toggle(name, ev.id, it) })
+                                }
+                            }
+                        }
                     }
-                    Box(Modifier.width(COL_W).alpha(if (tgEnabled) 1f else 0.5f), contentAlignment = Alignment.Center) {
-                        val key = kind.telegramKey
-                        if (tgBusy == key) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Checkbox(checked = tg[key] ?: true, enabled = loaded != null, onCheckedChange = { setTelegram(key, it) })
-                    }
+                    HorizontalDivider(color = cs.outlineVariant)
+                    error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
+                    Text(
+                        "Application Android : " + (if (devices > 0) "$devices téléphone(s) abonné(s), qui reçoivent tous ces évènements en instantané."
+                            else "aucun téléphone abonné (voir plus bas)."),
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
                 }
-            }
-            HorizontalDivider(color = cs.outlineVariant)
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                tgError?.let { Text("Telegram : $it", style = MaterialTheme.typography.bodySmall, color = cs.error) }
-                if (loaded != null && !tgEnabled) Text(
-                    "Le bot Telegram est désactivé : configurez-le plus bas pour que ces cases servent.",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                )
-                if (!instant) Text(
-                    "ntfy n'est pas encore actif sur ce téléphone : voyez son état plus bas.",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                )
-                if (android.os.Build.VERSION.SDK_INT >= 33 &&
-                    context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                ) Text(
-                    "Les notifications de Bullarr sont bloquées : autorisez-les dans les réglages Android de l'application.",
-                    style = MaterialTheme.typography.bodySmall, color = cs.error,
-                )
             }
         }
     }
 }
 
-/** Configuration de la réception sur ce téléphone : notifications instantanées (ntfy). */
+/** Application Android : notifications instantanées de ce téléphone, transportées par l'app ntfy (UnifiedPush). */
 @Composable
 private fun PhoneDeliveryCard(vm: AppViewModel) {
     val context = LocalContext.current

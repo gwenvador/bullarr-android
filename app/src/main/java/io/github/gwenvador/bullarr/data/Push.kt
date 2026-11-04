@@ -39,12 +39,17 @@ object Push {
 
     private fun prefs(context: Context) = context.getSharedPreferences("push", Context.MODE_PRIVATE)
 
-    /** Distributeurs UnifiedPush installés (paquet, nom affiché). */
+    /** Distributeurs connus, retenus même si Android ne liste pas leur récepteur (filtre de visibilité, version). */
+    private val KNOWN = listOf("io.heckel.ntfy", "org.unifiedpush.distributor.nextpush", "org.unifiedpush.distributor.sunup")
+
+    /** Distributeurs UnifiedPush installés (paquet, nom affiché) ; ntfy en premier. */
     fun distributors(context: Context): List<Pair<String, String>> {
         val pm = context.packageManager
         @Suppress("DEPRECATION")
-        return pm.queryBroadcastReceivers(Intent(REGISTER), 0)
-            .map { it.activityInfo.packageName }
+        val found = runCatching { pm.queryBroadcastReceivers(Intent(REGISTER), 0).map { it.activityInfo.packageName } }.getOrDefault(emptyList())
+        @Suppress("DEPRECATION")
+        val known = KNOWN.filter { runCatching { pm.getApplicationInfo(it, 0) }.isSuccess }
+        return (known + found)
             .filter { it != context.packageName }
             .distinct()
             .map { pkg -> pkg to runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
@@ -71,7 +76,7 @@ object Push {
             Intent(REGISTER).setPackage(distributor)
                 .putExtra("token", token)
                 .putExtra("application", context.packageName)
-                .putExtra("message", "Bullarr : imports effectués et disponibles")
+                .putExtra("message", "Notifications de Bullarr")
                 .putExtra("pi", authIntent(context)),
         )
         version++
@@ -129,14 +134,9 @@ object Push {
         return ok
     }
 
-    /** Message reçu : affiché selon les alertes choisies sur ce téléphone. */
+    /** Message reçu ({kind, title, body}) : affiché tel quel (import, surveillance, validation, mise à jour, test). */
     internal fun onMessage(context: Context, raw: ByteArray) {
         val o = runCatching { JSONObject(String(raw, Charsets.UTF_8)) }.getOrNull() ?: return
-        val name = o.optString("kind")
-        // Seuls les évènements de la page de réglages (et le message de test) sont affichés.
-        val kind = Alerts.Kind.entries.firstOrNull { it.pushKind == name }
-        if (kind == null && name != "test") return
-        if (kind != null && !Alerts.isOn(context, kind)) return
         val id = 2000 + ((System.currentTimeMillis() / 1000) % 100_000).toInt()
         Alerts.show(context, id, o.optString("title").ifBlank { "Bullarr" }, o.optString("body"))
     }

@@ -13,6 +13,9 @@
         <intent>
             <action android:name="org.unifiedpush.android.distributor.REGISTER" />
         </intent>
+        <package android:name="io.heckel.ntfy" />
+        <package android:name="org.unifiedpush.distributor.nextpush" />
+        <package android:name="org.unifiedpush.distributor.sunup" />
     </queries>
 
     <application
