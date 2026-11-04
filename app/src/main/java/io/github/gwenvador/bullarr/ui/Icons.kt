@@ -38,6 +38,7 @@ private val LOGOS = mapOf(
     "deluge" to R.drawable.src_deluge,
     "shelfmark" to R.drawable.src_shelfmark,
     "komga" to R.drawable.src_komga,
+    "ntfy" to R.drawable.src_ntfy,
     "bedetheque" to R.drawable.bedetheque_logo,
     // Genre / origine : même convention que la page web (BD = drapeau français).
     "bd" to R.drawable.src_flag_france, "europe" to R.drawable.src_flag_france,

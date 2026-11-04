@@ -10,16 +10,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.work.Constraints
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
 import io.github.gwenvador.bullarr.MainActivity
 import io.github.gwenvador.bullarr.R
-import java.util.concurrent.TimeUnit
 
 /** Client Bullarr d'après les réglages enregistrés (clé API, identifiant ou session SSO) ; null si rien n'est configuré. */
 fun apiFromSettings(settings: Settings): BullarrApi? =
@@ -34,57 +26,39 @@ fun apiFromSettings(settings: Settings): BullarrApi? =
     }.getOrNull()
 
 /**
- * Alertes du téléphone, application fermée : imports terminés, validations en attente, nouveautés.
- * Une vérification toutes les 30 minutes environ (WorkManager), seulement avec du réseau.
+ * Notifications de Bullarr sur le téléphone, reçues en instantané par ntfy (voir [Push]) :
+ * les mêmes évènements que les notifications Telegram de la page de réglages web.
  */
 object Alerts {
-    private const val WORK = "bullarr-alerts"
     private const val CHANNEL = "alerts"
 
     private fun prefs(context: Context) = context.getSharedPreferences("alerts", Context.MODE_PRIVATE)
 
-    /**
-     * Évènements notifiables. [periodic] : aussi détecté par la vérification toutes les 30 minutes
-     * (sinon seulement en instantané). [telegramKey] : réglage Telegram correspondant côté serveur ;
-     * [telegramAlways] : envoyé par le bot sans réglage dédié.
-     */
-    enum class Kind(
-        val key: String, val label: String, val detail: String, val default: Boolean, val periodic: Boolean,
-        val telegramKey: String? = null, val telegramAlways: Boolean = false,
-    ) {
-        ImportCompleted("imports", "Import effectué", "Des albums sont entrés dans la bibliothèque.", true, true, telegramKey = "notify_import_completed"),
-        ImportAvailable("import_available", "Fichiers à importer", "De nouveaux fichiers attendent dans les dossiers surveillés.", true, false, telegramKey = "notify_import_available"),
-        Reviews("reviews", "Validation en attente", "La recherche automatique attend un choix manuel.", true, true),
-        MonitorFound("monitor", "Tome surveillé trouvé", "Un album manquant d'une série surveillée est apparu (action « notifier »).", true, false, telegramAlways = true),
-        News("news", "Nouveautés", "Nouvelles sorties RSS, Telegram et EBDZ.", false, true),
+    /** Évènements notifiables, comme sur la page web (Configuration → Notifications) ; [telegramKey] : réglage Telegram du serveur. */
+    enum class Kind(val key: String, val pushKind: String, val label: String, val detail: String, val telegramKey: String) {
+        ImportCompleted(
+            "imports", "import_completed", "Import effectué",
+            "Quand un import (manuel ou automatique) déplace des fichiers dans la bibliothèque.", "notify_import_completed",
+        ),
+        ImportAvailable(
+            "import_available", "import_available", "Import disponible",
+            "Quand de nouveaux fichiers apparaissent dans les répertoires surveillés (nécessite l'import automatique, onglet Imports).", "notify_import_available",
+        ),
     }
 
-    fun isOn(context: Context, kind: Kind) = prefs(context).getBoolean("on_${kind.key}", kind.default)
+    fun isOn(context: Context, kind: Kind) = prefs(context).getBoolean("on_${kind.key}", true)
 
-    fun set(context: Context, kind: Kind, on: Boolean) {
-        prefs(context).edit().putBoolean("on_${kind.key}", on).apply()
-        schedule(context)
-    }
-
-    /** Programme (ou annule) la vérification périodique selon les alertes activées. */
-    fun schedule(context: Context) {
-        val wm = WorkManager.getInstance(context)
-        if (Kind.entries.none { it.periodic && isOn(context, it) }) { wm.cancelUniqueWork(WORK); return }
-        val request = PeriodicWorkRequestBuilder<AlertsWorker>(30, TimeUnit.MINUTES)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .build()
-        wm.enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP, request)
-    }
+    fun set(context: Context, kind: Kind, on: Boolean) { prefs(context).edit().putBoolean("on_${kind.key}", on).apply() }
 
     private fun channel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Alertes Bullarr", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Imports terminés, validations en attente et nouveautés, application fermée."
+                description = "Imports effectués et fichiers disponibles pour l'import."
             },
         )
     }
 
-    /** Affiche une alerte (aussi utilisée par les notifications instantanées, voir [Push]). */
+    /** Affiche une notification (messages reçus par ntfy, voir [Push]). */
     fun show(context: Context, id: Int, title: String, text: String) {
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -103,55 +77,5 @@ object Alerts {
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, n) }
-    }
-
-    /** Une vérification : compare au dernier état vu et prévient de ce qui est nouveau. La première fois, mémorise sans prévenir. */
-    suspend fun check(context: Context) {
-        val api = apiFromSettings(Settings(context)) ?: return
-        val p = prefs(context)
-        // Notifications instantanées actives : le serveur pousse déjà imports et validations.
-        val pushed = Push.active(context)
-
-        if (isOn(context, Kind.ImportCompleted) && !pushed) runCatching {
-            val history = api.getObject("api/import/history", mapOf("limit" to "20")).optJSONArray("history").objects()
-            val last = p.getInt("last_import_id", -1)
-            val maxId = history.maxOfOrNull { it.int("id") ?: 0 } ?: 0
-            if (last >= 0) {
-                val fresh = history.filter { (it.int("id") ?: 0) > last && (it.int("files_imported") ?: 0) + (it.int("files_replaced") ?: 0) > 0 }
-                if (fresh.isNotEmpty()) {
-                    val count = fresh.sumOf { (it.int("files_imported") ?: 0) + (it.int("files_replaced") ?: 0) }
-                    val names = fresh.mapNotNull { it.str("file_names") }.joinToString(" · ").take(300)
-                    show(context, 1001, if (count > 1) "$count albums importés" else "Album importé", names.ifBlank { "Bibliothèque mise à jour." })
-                }
-            }
-            if (maxId > last) p.edit().putInt("last_import_id", maxId).apply()
-        }
-
-        if (isOn(context, Kind.Reviews) && !pushed) runCatching {
-            val count = api.getObject("api/auto-acquire/reviews/count").int("count") ?: 0
-            val last = p.getInt("last_reviews", -1)
-            if (last >= 0 && count > last) {
-                show(context, 1002, "Validation en attente", if (count > 1) "$count choix attendent une décision dans Suivi → Validation." else "Un choix attend une décision dans Suivi → Validation.")
-            }
-            p.edit().putInt("last_reviews", count).apply()
-        }
-
-        if (isOn(context, Kind.News)) runCatching {
-            // Même repère que la pastille de l'app : nouveautés depuis la dernière visite de l'onglet.
-            val since = context.getSharedPreferences("badges", Context.MODE_PRIVATE).getString("newsSeen", null) ?: return@runCatching
-            val count = api.getObject("api/ebdz/nouveautes/new-count", mapOf("since" to since)).int("count") ?: 0
-            val last = p.getInt("last_news", -1)
-            if (last >= 0 && count > last) {
-                show(context, 1003, "Nouveautés", "$count nouvelle(s) sortie(s) depuis votre dernière visite.")
-            }
-            p.edit().putInt("last_news", count).apply()
-        }
-    }
-}
-
-class AlertsWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        runCatching { Alerts.check(applicationContext) }
-        return Result.success()
     }
 }

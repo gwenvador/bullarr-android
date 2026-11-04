@@ -56,7 +56,7 @@ object Push {
     fun error(context: Context): String? = prefs(context).getString("error", null)
     internal fun token(context: Context): String? = prefs(context).getString("token", null)
 
-    /** Abonnement actif : le serveur a accepté l'adresse du téléphone. Les alertes périodiques correspondantes s'effacent alors. */
+    /** Abonnement actif : le serveur a accepté l'adresse du téléphone. */
     fun active(context: Context) = enabled(context) && endpoint(context) != null && prefs(context).getBoolean("registered", false)
 
     private fun authIntent(context: Context): PendingIntent =
@@ -71,7 +71,7 @@ object Push {
             Intent(REGISTER).setPackage(distributor)
                 .putExtra("token", token)
                 .putExtra("application", context.packageName)
-                .putExtra("message", "Bullarr : imports, validations, tomes surveillés")
+                .putExtra("message", "Bullarr : imports effectués et disponibles")
                 .putExtra("pi", authIntent(context)),
         )
         version++
@@ -132,14 +132,10 @@ object Push {
     /** Message reçu : affiché selon les alertes choisies sur ce téléphone. */
     internal fun onMessage(context: Context, raw: ByteArray) {
         val o = runCatching { JSONObject(String(raw, Charsets.UTF_8)) }.getOrNull() ?: return
-        val kind = when (o.optString("kind")) {
-            "import_completed" -> Alerts.Kind.ImportCompleted
-            "import_available" -> Alerts.Kind.ImportAvailable
-            "review" -> Alerts.Kind.Reviews
-            "monitor_found" -> Alerts.Kind.MonitorFound
-            "test" -> null
-            else -> return
-        }
+        val name = o.optString("kind")
+        // Seuls les évènements de la page de réglages (et le message de test) sont affichés.
+        val kind = Alerts.Kind.entries.firstOrNull { it.pushKind == name }
+        if (kind == null && name != "test") return
         if (kind != null && !Alerts.isOn(context, kind)) return
         val id = 2000 + ((System.currentTimeMillis() / 1000) % 100_000).toInt()
         Alerts.show(context, id, o.optString("title").ifBlank { "Bullarr" }, o.optString("body"))

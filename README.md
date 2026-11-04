@@ -135,21 +135,17 @@ plan : ils continuent écran éteint, avec une notification (avancement, **Pause
 série, marquer lu ou non lu, mettre en pause ou reprendre, relancer les erreurs d'un coup et
 supprimer des copies. Il ne contacte jamais le serveur.
 
-## Alertes du téléphone
+## Notifications
 
-Configuration → Notifications, présenté comme la page de réglages web : un tableau
-« évènement × destination » avec des cases (Téléphone, Telegram) pour import effectué, fichiers
-à importer, validation en attente, tome surveillé trouvé et nouveautés, puis en dessous la
-configuration de chaque destination (notifications instantanées du téléphone, bot Telegram du
-serveur). Les cases Telegram s'enregistrent directement sur le serveur. Sans notifications
-instantanées, le téléphone vérifie environ toutes les 30 minutes (WorkManager, réseau requis).
+Configuration → Notifications reprend la page de réglages web : un tableau avec, pour **Import
+effectué** et **Import disponible**, une case **ntfy** (ce téléphone) et une case **Telegram**
+(bot du serveur, enregistrée directement sur Bullarr), puis la configuration de ntfy et du bot.
 
-**Notifications instantanées** : avec l'app gratuite [ntfy](https://f-droid.org/packages/io.heckel.ntfy/)
-installée (distributeur [UnifiedPush](https://unifiedpush.org/)), l'interrupteur « Notifications
-instantanées » abonne le téléphone : Bullarr pousse alors imports terminés, fichiers à importer,
-validations et tomes surveillés trouvés dès qu'ils ont lieu, sans interroger le serveur ni vider
-la batterie. Le serveur doit connaître les routes `/api/push/*` (Bullarr avec les notifications
-push) ; ntfy.sh ou un ntfy auto-hébergé conviennent.
+Sur le téléphone, les notifications arrivent en instantané par [ntfy](https://f-droid.org/packages/io.heckel.ntfy/)
+(distributeur [UnifiedPush](https://unifiedpush.org/)) : avec ntfy installé, l'interrupteur
+« Notifications instantanées » abonne le téléphone et Bullarr pousse chaque évènement dès qu'il
+a lieu, sans interroger le serveur ni vider la batterie. Le serveur doit connaître les routes
+`/api/push/*` (Bullarr avec les notifications push) ; ntfy.sh ou un ntfy auto-hébergé conviennent.
 
 ## Écrans et routes utilisées
 

@@ -64,7 +64,7 @@ fun NotificationsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var telegramOpen by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { NotificationTable(vm, telegram) }
-        item { SectionTitle("Ce téléphone") }
+        item { SectionTitle("ntfy (notifications sur ce téléphone)") }
         item { PhoneDeliveryCard(vm) }
         item { SectionTitle("Telegram (bot du serveur)") }
         item { ConfigCard(api, snackbar, telegram, expanded = telegramOpen, onToggle = { telegramOpen = !telegramOpen }) }
@@ -77,7 +77,7 @@ private fun SectionTitle(text: String) {
         modifier = Modifier.padding(start = 4.dp, top = 8.dp))
 }
 
-/** Tableau évènements × destinations. Colonne Téléphone : réglage local ; colonne Telegram : réglage du serveur. */
+/** Tableau évènements × destinations. Colonne ntfy : réglage de ce téléphone ; colonne Telegram : réglage du serveur. */
 @Composable
 private fun NotificationTable(vm: AppViewModel, telegram: ConfigEditor) {
     val context = LocalContext.current
@@ -91,7 +91,7 @@ private fun NotificationTable(vm: AppViewModel, telegram: ConfigEditor) {
     val loaded = telegram.loaded
     LaunchedEffect(loaded) {
         loaded ?: return@LaunchedEffect
-        Alerts.Kind.entries.mapNotNull { it.telegramKey }.forEach { k -> tg[k] = loaded.optBoolean(k, true) }
+        Alerts.Kind.entries.forEach { tg[it.telegramKey] = loaded.optBoolean(it.telegramKey, true) }
     }
     val tgEnabled = loaded?.optBoolean("enabled", false) == true
     @Suppress("UNUSED_VARIABLE") val pushState = io.github.gwenvador.bullarr.data.Push.version
@@ -119,9 +119,9 @@ private fun NotificationTable(vm: AppViewModel, telegram: ConfigEditor) {
             // En-tête : destinations.
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Évènement", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
-                Column(Modifier.width(COL_W), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Outlined.PhoneAndroid, contentDescription = null, tint = cs.primary, modifier = Modifier.size(20.dp))
-                    Text("Téléphone", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                Column(Modifier.width(COL_W).alpha(if (instant) 1f else 0.5f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Logo("ntfy", "ntfy", 20.dp, tip = false)
+                    Text("ntfy", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                 }
                 Column(Modifier.width(COL_W).alpha(if (tgEnabled) 1f else 0.5f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Logo("telegram", "Telegram", 20.dp, tip = false)
@@ -137,22 +137,15 @@ private fun NotificationTable(vm: AppViewModel, telegram: ConfigEditor) {
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(kind.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text(
-                            kind.detail + if (!kind.periodic && !instant) " Téléphone : avec les notifications instantanées seulement." else "",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                        )
+                        Text(kind.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
-                    Box(Modifier.width(COL_W), contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(COL_W).alpha(if (instant) 1f else 0.5f), contentAlignment = Alignment.Center) {
                         Checkbox(checked = phone[kind] == true, onCheckedChange = { on -> phone[kind] = on; Alerts.set(context, kind, on) })
                     }
                     Box(Modifier.width(COL_W).alpha(if (tgEnabled) 1f else 0.5f), contentAlignment = Alignment.Center) {
                         val key = kind.telegramKey
-                        when {
-                            key != null && tgBusy == key -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                            key != null -> Checkbox(checked = tg[key] ?: true, enabled = loaded != null, onCheckedChange = { setTelegram(key, it) })
-                            kind.telegramAlways -> Text("Toujours", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, textAlign = TextAlign.Center)
-                            else -> Text("—", style = MaterialTheme.typography.bodyMedium, color = cs.outline)
-                        }
+                        if (tgBusy == key) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Checkbox(checked = tg[key] ?: true, enabled = loaded != null, onCheckedChange = { setTelegram(key, it) })
                     }
                 }
             }
@@ -163,9 +156,8 @@ private fun NotificationTable(vm: AppViewModel, telegram: ConfigEditor) {
                     "Le bot Telegram est désactivé : configurez-le plus bas pour que ces cases servent.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
-                Text(
-                    if (instant) "Téléphone : instantané via ntfy ; les nouveautés sont vérifiées toutes les 30 minutes environ."
-                    else "Téléphone : vérifié toutes les 30 minutes environ. Activez les notifications instantanées plus bas pour tout recevoir sur le moment.",
+                if (!instant) Text(
+                    "ntfy n'est pas encore actif sur ce téléphone : voyez son état plus bas.",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 )
                 if (android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -232,7 +224,7 @@ private fun PhoneDeliveryCard(vm: AppViewModel) {
                         Text(
                             when {
                                 error != null -> error
-                                push.active(context) -> "Actif via $name : imports et validations arrivent dès qu'ils ont lieu."
+                                push.active(context) -> "Actif via $name : les notifications cochées arrivent dès que l'évènement a lieu."
                                 push.endpoint(context) != null -> "Enregistrement auprès du serveur Bullarr…"
                                 else -> "En attente de $name… (ouvrez $name s'il ne répond pas)"
                             },
