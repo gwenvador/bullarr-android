@@ -72,11 +72,6 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         io.github.gwenvador.bullarr.ui.ThemePref.init(this)
-        // Notifications instantanées : ré-enregistre l'adresse du téléphone (serveur changé, reconnexion…).
-        val appContext = applicationContext
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            runCatching { io.github.gwenvador.bullarr.data.Push.syncServer(appContext) }
-        }
         setContent { BullarrTheme { BullarrApp() } }
         handleAuthIntent(intent)
     }

@@ -57,7 +57,7 @@ private data class NotifChannel(val enabled: Boolean, val configured: Boolean, v
 /**
  * Onglet Configuration → Notifications, comme la page de réglages web : le tableau « Événements »
  * (une ligne par type, une case Telegram et une case ntfy, enregistrées aussitôt), puis les cartes
- * Telegram et ntfy, et la carte « Application Android » des notifications instantanées du téléphone.
+ * Telegram et ntfy. Les notifications sont envoyées par le serveur ; l'app ne fait que les régler.
  */
 @Composable
 fun NotificationsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
@@ -76,8 +76,6 @@ fun NotificationsScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         item { SectionTitle("Canaux") }
         item { ConfigCard(api, snackbar, telegram, expanded = open == "telegram", onToggle = { open = if (open == "telegram") null else "telegram" }) }
         item { ConfigCard(api, snackbar, ntfy, expanded = open == "ntfy", onToggle = { open = if (open == "ntfy") null else "ntfy" }) }
-        item { SectionTitle("Application Android (ce téléphone)") }
-        item { PhoneDeliveryCard(vm) }
     }
 }
 
@@ -93,7 +91,6 @@ private fun EventsTable(vm: AppViewModel, reload: Any) {
     val scope = rememberCoroutineScope()
     var events by remember { mutableStateOf<List<NotifEvent>?>(null) }
     val channels = remember { mutableStateMapOf<String, NotifChannel>() }
-    var devices by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     val api = vm.api
@@ -115,7 +112,6 @@ private fun EventsTable(vm: AppViewModel, reload: Any) {
                     ev?.keys()?.asSequence()?.associateWith { ev.optBoolean(it) }.orEmpty(),
                 )
             }
-            devices = o.optInt("push_devices")
             error = null
         } catch (e: Exception) {
             val msg = e.readable()
@@ -187,96 +183,6 @@ private fun EventsTable(vm: AppViewModel, reload: Any) {
                     }
                     HorizontalDivider(color = cs.outlineVariant)
                     error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
-                    Text(
-                        "Application Android : " + (if (devices > 0) "$devices téléphone(s) abonné(s), qui reçoivent tous ces évènements en instantané."
-                            else "aucun téléphone abonné (voir plus bas)."),
-                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** Application Android : notifications instantanées de ce téléphone, transportées par l'app ntfy (UnifiedPush). */
-@Composable
-private fun PhoneDeliveryCard(vm: AppViewModel) {
-    val context = LocalContext.current
-    val cs = MaterialTheme.colorScheme
-    val uri = LocalUriHandler.current
-    val scope = rememberCoroutineScope()
-    val push = io.github.gwenvador.bullarr.data.Push
-    @Suppress("UNUSED_VARIABLE") val pushState = push.version
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // Notifications instantanées : le serveur pousse chaque évènement via ntfy (UnifiedPush).
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(cs.surfaceVariant.copy(alpha = 0.5f)).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                @Suppress("UNUSED_VARIABLE") val tick = push.version
-                val distributors = remember(tick) { push.distributors(context) }
-                val enabled = push.enabled(context)
-                var testing by remember { mutableStateOf(false) }
-                var testResult by remember { mutableStateOf<String?>(null) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Notifications instantanées", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Reçues tout de suite, sans vider la batterie, grâce à l'app gratuite ntfy.",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                        )
-                    }
-                    if (distributors.isNotEmpty()) Switch(
-                        checked = enabled,
-                        onCheckedChange = { on ->
-                            testResult = null
-                            if (on) push.enable(context, push.distributor(context)?.takeIf { d -> distributors.any { it.first == d } } ?: distributors.first().first)
-                            else push.disable(context)
-                        },
-                    )
-                }
-                when {
-                    distributors.isEmpty() -> {
-                        Text(
-                            "Installez ntfy (F-Droid ou Play Store), ouvrez-le une fois, puis revenez ici.",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                        )
-                        OutlinedButton(onClick = { runCatching { uri.openUri(io.github.gwenvador.bullarr.data.Push.NTFY_URL) } }) { Text("Installer ntfy") }
-                    }
-                    !enabled -> {}
-                    else -> {
-                        val name = distributors.firstOrNull { it.first == push.distributor(context) }?.second ?: "ntfy"
-                        val error = push.error(context)
-                        Text(
-                            when {
-                                error != null -> error
-                                push.active(context) -> "Actif via $name : les notifications cochées arrivent dès que l'évènement a lieu."
-                                push.endpoint(context) != null -> "Enregistrement auprès du serveur Bullarr…"
-                                else -> "En attente de $name… (ouvrez $name s'il ne répond pas)"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (error != null) cs.error else if (push.active(context)) cs.primary else cs.onSurfaceVariant,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (push.active(context)) OutlinedButton(
-                                enabled = !testing,
-                                onClick = {
-                                    val api = vm.api ?: return@OutlinedButton
-                                    testing = true; testResult = null
-                                    scope.launch {
-                                        testResult = try { api.postObject("api/push/test", JSONObject()); "Envoyé : la notification doit arriver dans un instant." }
-                                        catch (e: Exception) { e.readable() }
-                                        testing = false
-                                    }
-                                },
-                            ) { if (testing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Tester") }
-                            if (error != null || (push.endpoint(context) != null && !push.active(context))) OutlinedButton(onClick = {
-                                scope.launch { push.syncServer(context.applicationContext) }
-                            }) { Text("Réessayer") }
-                        }
-                        testResult?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                    }
                 }
             }
         }

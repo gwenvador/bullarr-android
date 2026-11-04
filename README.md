@@ -144,11 +144,9 @@ Configuration → Notifications reprend la page de réglages web de Bullarr :
   attente, mise à jour disponible), une case **Telegram** et une case **ntfy**, enregistrées aussitôt.
 - **Canaux** : les cartes Telegram (bot) et ntfy (serveur, topic, authentification, priorité,
   notification test), comme sur le site.
-- **Application Android** : notifications instantanées de ce téléphone. Avec l'app
-  [ntfy](https://f-droid.org/packages/io.heckel.ntfy/) installée (distributeur
-  [UnifiedPush](https://unifiedpush.org/)), l'interrupteur abonne le téléphone
-  (`POST /api/push/register`) ; Bullarr y pousse chaque évènement dès qu'il a lieu, sans que le
-  téléphone interroge le serveur. `POST /api/push/test` envoie un essai.
+
+Les notifications sont envoyées par le serveur Bullarr (Telegram et ntfy) ; pour les recevoir sur
+le téléphone, abonnez-vous au topic ntfy configuré dans l'app [ntfy](https://f-droid.org/packages/io.heckel.ntfy/).
 
 ## Écrans et routes utilisées
 

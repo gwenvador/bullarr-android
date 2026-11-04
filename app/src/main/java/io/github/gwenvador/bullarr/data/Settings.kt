@@ -62,3 +62,15 @@ class Settings(context: Context) {
         const val KEY_COOKIE = "session_cookie"
     }
 }
+
+/** Client Bullarr d'après les réglages enregistrés (clé API, identifiant ou session SSO) ; null si rien n'est configuré. */
+fun apiFromSettings(settings: Settings): BullarrApi? =
+    if (!settings.isConfigured) null
+    else runCatching {
+        if (settings.authMode == "key") BullarrApi(settings.serverUrl, settings.apiKey)
+        else BullarrApi(settings.serverUrl, "", SessionAuth(
+            settings.sessionCookie,
+            if (settings.authMode == "password") settings.username else "",
+            if (settings.authMode == "password") settings.password else "",
+        ) { settings.sessionCookie = it })
+    }.getOrNull()
