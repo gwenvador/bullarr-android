@@ -137,9 +137,12 @@ supprimer des copies. Il ne contacte jamais le serveur.
 
 ## Alertes du téléphone
 
-Configuration → Notifications → « Alertes sur ce téléphone » : imports terminés, validations
-en attente et nouveautés, notifiés même application fermée (vérification environ toutes les
-30 minutes avec WorkManager, seulement avec du réseau). Chaque alerte se coupe séparément.
+Configuration → Notifications, présenté comme la page de réglages web : un tableau
+« évènement × destination » avec des cases (Téléphone, Telegram) pour import effectué, fichiers
+à importer, validation en attente, tome surveillé trouvé et nouveautés, puis en dessous la
+configuration de chaque destination (notifications instantanées du téléphone, bot Telegram du
+serveur). Les cases Telegram s'enregistrent directement sur le serveur. Sans notifications
+instantanées, le téléphone vérifie environ toutes les 30 minutes (WorkManager, réseau requis).
 
 **Notifications instantanées** : avec l'app gratuite [ntfy](https://f-droid.org/packages/io.heckel.ntfy/)
 installée (distributeur [UnifiedPush](https://unifiedpush.org/)), l'interrupteur « Notifications

@@ -229,7 +229,7 @@ private fun ConfigBadge(spec: Integration) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigEditor, expanded: Boolean, onToggle: () -> Unit) {
+internal fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigEditor, expanded: Boolean, onToggle: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val o = e.loaded
@@ -409,126 +409,6 @@ fun WebSettingsScreen(vm: AppViewModel) {
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        }
-    }
-}
-
-/** Alertes du téléphone (application fermée) : imports, validations, nouveautés. Réglage propre à l'appareil. */
-@Composable
-fun PhoneAlertsCard(vm: AppViewModel) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val cs = MaterialTheme.colorScheme
-    val uri = LocalUriHandler.current
-    val scope = rememberCoroutineScope()
-    val push = io.github.gwenvador.bullarr.data.Push
-    // Lu ici : tout l'encart se redessine quand l'abonnement évolue (réponse de ntfy, du serveur).
-    @Suppress("UNUSED_VARIABLE") val pushState = push.version
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(cs.surfaceVariant), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = cs.primary)
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Alertes sur ce téléphone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (push.active(context)) "Instantanées via ntfy (nouveautés : toutes les 30 minutes environ)."
-                        else "Même application fermée, vérifiées environ toutes les 30 minutes.",
-                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                    )
-                }
-            }
-            // Notifications instantanées : le serveur pousse chaque évènement via ntfy (UnifiedPush).
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(cs.surfaceVariant.copy(alpha = 0.5f)).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                @Suppress("UNUSED_VARIABLE") val tick = push.version
-                val distributors = remember(tick) { push.distributors(context) }
-                val enabled = push.enabled(context)
-                var testing by remember { mutableStateOf(false) }
-                var testResult by remember { mutableStateOf<String?>(null) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Notifications instantanées", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Reçues tout de suite, sans vider la batterie, grâce à l'app gratuite ntfy.",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                        )
-                    }
-                    if (distributors.isNotEmpty()) Switch(
-                        checked = enabled,
-                        onCheckedChange = { on ->
-                            testResult = null
-                            if (on) push.enable(context, push.distributor(context)?.takeIf { d -> distributors.any { it.first == d } } ?: distributors.first().first)
-                            else push.disable(context)
-                        },
-                    )
-                }
-                when {
-                    distributors.isEmpty() -> {
-                        Text(
-                            "Installez ntfy (F-Droid ou Play Store), ouvrez-le une fois, puis revenez ici.",
-                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                        )
-                        OutlinedButton(onClick = { runCatching { uri.openUri(io.github.gwenvador.bullarr.data.Push.NTFY_URL) } }) { Text("Installer ntfy") }
-                    }
-                    !enabled -> {}
-                    else -> {
-                        val name = distributors.firstOrNull { it.first == push.distributor(context) }?.second ?: "ntfy"
-                        val error = push.error(context)
-                        Text(
-                            when {
-                                error != null -> error
-                                push.active(context) -> "Actif via $name : imports et validations arrivent dès qu'ils ont lieu."
-                                push.endpoint(context) != null -> "Enregistrement auprès du serveur Bullarr…"
-                                else -> "En attente de $name… (ouvrez $name s'il ne répond pas)"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (error != null) cs.error else if (push.active(context)) cs.primary else cs.onSurfaceVariant,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (push.active(context)) OutlinedButton(
-                                enabled = !testing,
-                                onClick = {
-                                    val api = vm.api ?: return@OutlinedButton
-                                    testing = true; testResult = null
-                                    scope.launch {
-                                        testResult = try { api.postObject("api/push/test", JSONObject()); "Envoyé : la notification doit arriver dans un instant." }
-                                        catch (e: Exception) { e.readable() }
-                                        testing = false
-                                    }
-                                },
-                            ) { if (testing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Tester") }
-                            if (error != null || (push.endpoint(context) != null && !push.active(context))) OutlinedButton(onClick = {
-                                scope.launch { push.syncServer(context.applicationContext) }
-                            }) { Text("Réessayer") }
-                        }
-                        testResult?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                    }
-                }
-            }
-            io.github.gwenvador.bullarr.data.Alerts.Kind.entries.forEach { kind ->
-                var on by remember { mutableStateOf(io.github.gwenvador.bullarr.data.Alerts.isOn(context, kind)) }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(kind.label, style = MaterialTheme.typography.bodyLarge)
-                        Text(kind.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    }
-                    Switch(checked = on, onCheckedChange = { on = it; io.github.gwenvador.bullarr.data.Alerts.set(context, kind, it) })
-                }
-            }
-            if (android.os.Build.VERSION.SDK_INT >= 33 &&
-                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) Text(
-                "Les notifications de Bullarr sont bloquées : autorisez-les dans les réglages Android de l'application.",
-                style = MaterialTheme.typography.bodySmall, color = cs.error,
-            )
-            Text(
-                "Les alertes Telegram ci-dessous sont envoyées par le serveur Bullarr ; celles-ci viennent du téléphone.",
-                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-            )
         }
     }
 }

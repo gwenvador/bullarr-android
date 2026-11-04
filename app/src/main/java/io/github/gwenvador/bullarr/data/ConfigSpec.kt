@@ -124,8 +124,8 @@ val INDEXERS = listOf(
 val NOTIFICATIONS = listOf(
     Integration(
         "telegram", "Telegram (bot)", "api/telegram/config",
-        listOf(ENABLED, FSecret("bot_token", "Jeton du bot"), FText("chat_id", "Identifiant du chat"),
-            FSwitch("notify_import_completed", "Import terminé"), FSwitch("notify_import_available", "Fichier prêt à importer")),
+        // Les évènements à envoyer se cochent dans le tableau de l'onglet Notifications.
+        listOf(ENABLED, FSecret("bot_token", "Jeton du bot"), FText("chat_id", "Identifiant du chat")),
         TestCall(true, "api/telegram/test", label = "Envoyer un message test", note = "Envoie un vrai message au chat configuré (réglages enregistrés)."),
     ),
 )

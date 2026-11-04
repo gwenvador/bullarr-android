@@ -43,13 +43,23 @@ object Alerts {
 
     private fun prefs(context: Context) = context.getSharedPreferences("alerts", Context.MODE_PRIVATE)
 
-    enum class Kind(val key: String, val label: String, val detail: String) {
-        Imports("imports", "Imports terminés", "Un album vient d'être importé dans la bibliothèque."),
-        Reviews("reviews", "Validations en attente", "La recherche automatique attend un choix manuel."),
-        News("news", "Nouveautés", "Nouvelles sorties (RSS, Telegram, EBDZ) et tomes surveillés trouvés."),
+    /**
+     * Évènements notifiables. [periodic] : aussi détecté par la vérification toutes les 30 minutes
+     * (sinon seulement en instantané). [telegramKey] : réglage Telegram correspondant côté serveur ;
+     * [telegramAlways] : envoyé par le bot sans réglage dédié.
+     */
+    enum class Kind(
+        val key: String, val label: String, val detail: String, val default: Boolean, val periodic: Boolean,
+        val telegramKey: String? = null, val telegramAlways: Boolean = false,
+    ) {
+        ImportCompleted("imports", "Import effectué", "Des albums sont entrés dans la bibliothèque.", true, true, telegramKey = "notify_import_completed"),
+        ImportAvailable("import_available", "Fichiers à importer", "De nouveaux fichiers attendent dans les dossiers surveillés.", true, false, telegramKey = "notify_import_available"),
+        Reviews("reviews", "Validation en attente", "La recherche automatique attend un choix manuel.", true, true),
+        MonitorFound("monitor", "Tome surveillé trouvé", "Un album manquant d'une série surveillée est apparu (action « notifier »).", true, false, telegramAlways = true),
+        News("news", "Nouveautés", "Nouvelles sorties RSS, Telegram et EBDZ.", false, true),
     }
 
-    fun isOn(context: Context, kind: Kind) = prefs(context).getBoolean("on_${kind.key}", kind != Kind.News)
+    fun isOn(context: Context, kind: Kind) = prefs(context).getBoolean("on_${kind.key}", kind.default)
 
     fun set(context: Context, kind: Kind, on: Boolean) {
         prefs(context).edit().putBoolean("on_${kind.key}", on).apply()
@@ -59,7 +69,7 @@ object Alerts {
     /** Programme (ou annule) la vérification périodique selon les alertes activées. */
     fun schedule(context: Context) {
         val wm = WorkManager.getInstance(context)
-        if (Kind.entries.none { isOn(context, it) }) { wm.cancelUniqueWork(WORK); return }
+        if (Kind.entries.none { it.periodic && isOn(context, it) }) { wm.cancelUniqueWork(WORK); return }
         val request = PeriodicWorkRequestBuilder<AlertsWorker>(30, TimeUnit.MINUTES)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
@@ -102,7 +112,7 @@ object Alerts {
         // Notifications instantanées actives : le serveur pousse déjà imports et validations.
         val pushed = Push.active(context)
 
-        if (isOn(context, Kind.Imports) && !pushed) runCatching {
+        if (isOn(context, Kind.ImportCompleted) && !pushed) runCatching {
             val history = api.getObject("api/import/history", mapOf("limit" to "20")).optJSONArray("history").objects()
             val last = p.getInt("last_import_id", -1)
             val maxId = history.maxOfOrNull { it.int("id") ?: 0 } ?: 0

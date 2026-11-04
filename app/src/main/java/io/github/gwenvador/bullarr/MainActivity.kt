@@ -202,7 +202,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     1 -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
                                     2 -> ConfigScreen(vm, snackbar, INDEXERS)
                                     3 -> ConfigScreen(vm, snackbar, CLIENTS)
-                                    4 -> ConfigScreen(vm, snackbar, NOTIFICATIONS, header = { io.github.gwenvador.bullarr.ui.PhoneAlertsCard(vm) })
+                                    4 -> io.github.gwenvador.bullarr.ui.NotificationsScreen(vm, snackbar)
                                     5 -> ConfigScreen(vm, snackbar, IMPORTS)
                                     6 -> ConfigScreen(vm, snackbar, SEARCH)
                                     7 -> ConfigScreen(vm, snackbar, MONITOR)

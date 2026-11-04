@@ -133,9 +133,10 @@ object Push {
     internal fun onMessage(context: Context, raw: ByteArray) {
         val o = runCatching { JSONObject(String(raw, Charsets.UTF_8)) }.getOrNull() ?: return
         val kind = when (o.optString("kind")) {
-            "import_completed", "import_available" -> Alerts.Kind.Imports
+            "import_completed" -> Alerts.Kind.ImportCompleted
+            "import_available" -> Alerts.Kind.ImportAvailable
             "review" -> Alerts.Kind.Reviews
-            "monitor_found" -> Alerts.Kind.News
+            "monitor_found" -> Alerts.Kind.MonitorFound
             "test" -> null
             else -> return
         }
