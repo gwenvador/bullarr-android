@@ -257,7 +257,10 @@ internal fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigE
         if (o == null) return@Card
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             e.spec.help?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-            e.spec.fields.forEach { f -> FieldEditor(f, e, o) }
+            e.spec.fields.forEach { f ->
+                val cond = f.showWhen
+                if (cond == null || (e.values[cond.first] as? String) in cond.second) FieldEditor(f, e, o)
+            }
             e.message?.let { m ->
                 if (e.messageIsError) ErrorCard(m) else Text(m, color = cs.primary, style = MaterialTheme.typography.bodyMedium)
             }

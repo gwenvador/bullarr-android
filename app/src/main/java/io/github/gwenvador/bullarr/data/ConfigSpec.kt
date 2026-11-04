@@ -10,16 +10,24 @@ sealed interface Field {
     /** Chemin dans le JSON ; « a.b » désigne l'objet imbriqué a, clé b. */
     val key: String
     val label: String
+    /** Affiché seulement si le champ [first] vaut l'une des valeurs [second] (ex. jeton si auth = token). */
+    val showWhen: Pair<String, List<String>>? get() = null
 }
 
-data class FText(override val key: String, override val label: String, val hint: String? = null, val url: Boolean = false) : Field
+data class FText(
+    override val key: String, override val label: String, val hint: String? = null, val url: Boolean = false,
+    override val showWhen: Pair<String, List<String>>? = null,
+) : Field
 data class FNumber(override val key: String, override val label: String) : Field
 data class FSwitch(override val key: String, override val label: String, val help: String? = null) : Field
 /**
  * Secret : jamais relu en clair. Laissé vide = inchangé ; le serveur ne l'écrase que s'il est renseigné.
  * [keepMasked] : pour un serveur qui efface le secret reçu vide (ntfy), renvoie la valeur masquée lue.
  */
-data class FSecret(override val key: String, override val label: String, val keepMasked: Boolean = false) : Field
+data class FSecret(
+    override val key: String, override val label: String, val keepMasked: Boolean = false,
+    override val showWhen: Pair<String, List<String>>? = null,
+) : Field
 data class FChoice(override val key: String, override val label: String, val options: List<Pair<String, String>>) : Field
 /** Liste ordonnée dont seul l'ordre se règle (priorité des sources). */
 data class FOrder(override val key: String, override val label: String, val names: Map<String, String>, val help: String? = null) : Field
@@ -133,9 +141,10 @@ val NTFY_CHANNEL = Integration(
         FText("server_url", "Serveur", "https://ntfy.sh", url = true),
         FText("topic", "Topic", "ex : bullarr-7f3k9q"),
         FChoice("auth", "Authentification", listOf("none" to "Aucune", "token" to "Jeton d'accès", "basic" to "Identifiant et mot de passe")),
-        FSecret("token", "Jeton d'accès", keepMasked = true),
-        FText("username", "Identifiant"),
-        FSecret("password", "Mot de passe", keepMasked = true),
+        // Comme sur le site : jeton ou identifiant et mot de passe selon l'authentification choisie.
+        FSecret("token", "Jeton d'accès", keepMasked = true, showWhen = "auth" to listOf("token")),
+        FText("username", "Identifiant", showWhen = "auth" to listOf("basic")),
+        FSecret("password", "Mot de passe", keepMasked = true, showWhen = "auth" to listOf("basic")),
         FChoice("priority", "Priorité", listOf("1" to "Minimale", "2" to "Basse", "3" to "Normale", "4" to "Haute", "5" to "Urgente")),
     ),
     TestCall(true, "api/ntfy/test", label = "Envoyer une notification test", note = "Envoie une vraie notification au topic enregistré.", sendConfig = true),
