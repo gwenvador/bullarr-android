@@ -7,7 +7,7 @@ Interface en français, thème clair ou sombre : suit le téléphone, ou forcé 
 <p align="center">
   <a href="https://gwenvador.github.io/bullarr-android/repo/"><img src="https://gwenvador.github.io/bullarr/fdroid.svg" alt="Installer Bullarr avec F-Droid" height="64"></a>
   <a href="https://github.com/gwenvador/bullarr-android/releases/latest"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/signed-apk.svg" alt="Télécharger le dernier APK signé de Bullarr" height="64"></a>
-  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/gwenvador/bullarr-android"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/obtainium.svg" alt="Installer et mettre à jour Bullarr avec Obtainium" height="64"></a>
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/gwenvador/bullarr-android"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/obtainium.png" alt="Disponible sur Obtainium" height="64"></a>
 </p>
 
 ## Installation
