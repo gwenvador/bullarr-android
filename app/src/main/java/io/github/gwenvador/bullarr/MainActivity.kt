@@ -61,6 +61,7 @@ import io.github.gwenvador.bullarr.ui.SearchScreen
 import io.github.gwenvador.bullarr.ui.Section
 import io.github.gwenvador.bullarr.ui.SeriesScreen
 import io.github.gwenvador.bullarr.ui.VerificationScreen
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,6 +74,11 @@ class MainActivity : ComponentActivity() {
         io.github.gwenvador.bullarr.ui.ThemePref.init(this)
         // Alertes en arrière-plan (imports, validations, nouveautés) selon les réglages du téléphone.
         io.github.gwenvador.bullarr.data.Alerts.schedule(this)
+        // Notifications instantanées : ré-enregistre l'adresse du téléphone (serveur changé, reconnexion…).
+        val appContext = applicationContext
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { io.github.gwenvador.bullarr.data.Push.syncServer(appContext) }
+        }
         setContent { BullarrTheme { BullarrApp() } }
         handleAuthIntent(intent)
     }
@@ -196,7 +202,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     1 -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
                                     2 -> ConfigScreen(vm, snackbar, INDEXERS)
                                     3 -> ConfigScreen(vm, snackbar, CLIENTS)
-                                    4 -> ConfigScreen(vm, snackbar, NOTIFICATIONS, header = { io.github.gwenvador.bullarr.ui.PhoneAlertsCard() })
+                                    4 -> ConfigScreen(vm, snackbar, NOTIFICATIONS, header = { io.github.gwenvador.bullarr.ui.PhoneAlertsCard(vm) })
                                     5 -> ConfigScreen(vm, snackbar, IMPORTS)
                                     6 -> ConfigScreen(vm, snackbar, SEARCH)
                                     7 -> ConfigScreen(vm, snackbar, MONITOR)

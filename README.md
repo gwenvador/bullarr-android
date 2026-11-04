@@ -127,6 +127,13 @@ Configuration → Notifications → « Alertes sur ce téléphone » : imports t
 en attente et nouveautés, notifiés même application fermée (vérification environ toutes les
 30 minutes avec WorkManager, seulement avec du réseau). Chaque alerte se coupe séparément.
 
+**Notifications instantanées** : avec l'app gratuite [ntfy](https://f-droid.org/packages/io.heckel.ntfy/)
+installée (distributeur [UnifiedPush](https://unifiedpush.org/)), l'interrupteur « Notifications
+instantanées » abonne le téléphone : Bullarr pousse alors imports terminés, fichiers à importer,
+validations et tomes surveillés trouvés dès qu'ils ont lieu, sans interroger le serveur ni vider
+la batterie. Le serveur doit connaître les routes `/api/push/*` (Bullarr avec les notifications
+push) ; ntfy.sh ou un ntfy auto-hébergé conviennent.
+
 ## Écrans et routes utilisées
 
 | Écran | Routes |

@@ -46,7 +46,7 @@ object Alerts {
     enum class Kind(val key: String, val label: String, val detail: String) {
         Imports("imports", "Imports terminés", "Un album vient d'être importé dans la bibliothèque."),
         Reviews("reviews", "Validations en attente", "La recherche automatique attend un choix manuel."),
-        News("news", "Nouveautés", "De nouvelles sorties sont arrivées (RSS, Telegram, EBDZ)."),
+        News("news", "Nouveautés", "Nouvelles sorties (RSS, Telegram, EBDZ) et tomes surveillés trouvés."),
     }
 
     fun isOn(context: Context, kind: Kind) = prefs(context).getBoolean("on_${kind.key}", kind != Kind.News)
@@ -74,7 +74,8 @@ object Alerts {
         )
     }
 
-    private fun notify(context: Context, id: Int, title: String, text: String) {
+    /** Affiche une alerte (aussi utilisée par les notifications instantanées, voir [Push]). */
+    fun show(context: Context, id: Int, title: String, text: String) {
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -98,8 +99,10 @@ object Alerts {
     suspend fun check(context: Context) {
         val api = apiFromSettings(Settings(context)) ?: return
         val p = prefs(context)
+        // Notifications instantanées actives : le serveur pousse déjà imports et validations.
+        val pushed = Push.active(context)
 
-        if (isOn(context, Kind.Imports)) runCatching {
+        if (isOn(context, Kind.Imports) && !pushed) runCatching {
             val history = api.getObject("api/import/history", mapOf("limit" to "20")).optJSONArray("history").objects()
             val last = p.getInt("last_import_id", -1)
             val maxId = history.maxOfOrNull { it.int("id") ?: 0 } ?: 0
@@ -108,17 +111,17 @@ object Alerts {
                 if (fresh.isNotEmpty()) {
                     val count = fresh.sumOf { (it.int("files_imported") ?: 0) + (it.int("files_replaced") ?: 0) }
                     val names = fresh.mapNotNull { it.str("file_names") }.joinToString(" · ").take(300)
-                    notify(context, 1001, if (count > 1) "$count albums importés" else "Album importé", names.ifBlank { "Bibliothèque mise à jour." })
+                    show(context, 1001, if (count > 1) "$count albums importés" else "Album importé", names.ifBlank { "Bibliothèque mise à jour." })
                 }
             }
             if (maxId > last) p.edit().putInt("last_import_id", maxId).apply()
         }
 
-        if (isOn(context, Kind.Reviews)) runCatching {
+        if (isOn(context, Kind.Reviews) && !pushed) runCatching {
             val count = api.getObject("api/auto-acquire/reviews/count").int("count") ?: 0
             val last = p.getInt("last_reviews", -1)
             if (last >= 0 && count > last) {
-                notify(context, 1002, "Validation en attente", if (count > 1) "$count choix attendent une décision dans Suivi → Validation." else "Un choix attend une décision dans Suivi → Validation.")
+                show(context, 1002, "Validation en attente", if (count > 1) "$count choix attendent une décision dans Suivi → Validation." else "Un choix attend une décision dans Suivi → Validation.")
             }
             p.edit().putInt("last_reviews", count).apply()
         }
@@ -129,7 +132,7 @@ object Alerts {
             val count = api.getObject("api/ebdz/nouveautes/new-count", mapOf("since" to since)).int("count") ?: 0
             val last = p.getInt("last_news", -1)
             if (last >= 0 && count > last) {
-                notify(context, 1003, "Nouveautés", "$count nouvelle(s) sortie(s) depuis votre dernière visite.")
+                show(context, 1003, "Nouveautés", "$count nouvelle(s) sortie(s) depuis votre dernière visite.")
             }
             p.edit().putInt("last_news", count).apply()
         }
