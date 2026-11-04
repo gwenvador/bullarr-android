@@ -7,6 +7,7 @@ Interface en français, thème clair ou sombre : suit le téléphone, ou forcé 
 <p align="center">
   <a href="https://gwenvador.github.io/bullarr-android/repo/"><img src="https://gwenvador.github.io/bullarr/fdroid.svg" alt="Installer Bullarr avec F-Droid" height="64"></a>
   <a href="https://github.com/gwenvador/bullarr-android/releases/latest"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/signed-apk.svg" alt="Télécharger le dernier APK signé de Bullarr" height="64"></a>
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/gwenvador/bullarr-android"><img src="https://raw.githubusercontent.com/gwenvador/bullarr-android/main/assets/badges/obtainium.svg" alt="Installer et mettre à jour Bullarr avec Obtainium" height="64"></a>
 </p>
 
 ## Installation
@@ -34,6 +35,19 @@ clé maître dans le Keystore Android).
 
 **Mises à jour** : Configuration → Connexion affiche la version installée et compare avec la
 dernière release GitHub (l'APK doit s'appeler `bullarr-android-<version>.apk`).
+
+### Obtainium
+
+[Obtainium](https://github.com/ImranR98/Obtainium) installe l'APK directement depuis les
+[releases GitHub](https://github.com/gwenvador/bullarr-android/releases) et prévient à chaque
+nouvelle version. Depuis le téléphone, ouvrez ce lien (Obtainium installé) :
+
+    obtainium://add/https://github.com/gwenvador/bullarr-android
+
+Ou, dans Obtainium, **Ajouter une application** → collez `https://github.com/gwenvador/bullarr-android`.
+Chaque release ne contient qu'un seul APK (`bullarr-android-<version>.apk`), qu'Obtainium choisit
+seul ; il est signé avec la même clé que les autres canaux, donc les mises à jour s'installent
+par-dessus une version venue de F-Droid ou d'un APK téléchargé.
 
 ### Dépôt F-Droid
 
