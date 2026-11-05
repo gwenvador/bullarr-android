@@ -116,10 +116,15 @@ object PageCache {
     }
 }
 
-data class ReaderMeta(val volumeId: Int, val seriesTitle: String?, val label: String?, val title: String?, val pageCount: Int, val seriesId: Int? = null)
+data class ReaderMeta(
+    val volumeId: Int, val seriesTitle: String?, val label: String?, val title: String?, val pageCount: Int, val seriesId: Int? = null,
+    /** Avancement Komga renvoyé par le serveur : page à reprendre (1-based) et album lu en entier. */
+    val resumePage: Int? = null, val readCompleted: Boolean = false,
+)
 
 fun parseReaderMeta(volumeId: Int, o: org.json.JSONObject) = ReaderMeta(
     volumeId, o.str("series_title"), o.str("label"), o.str("title"),
     o.int("page_count") ?: throw ApiException("GET /api/volumes/$volumeId/reader : le nombre de pages est absent de la réponse."),
     o.int("series_id"),
+    o.int("resume_page")?.takeIf { it > 0 }, o.bool("read_completed") == true,
 )

@@ -89,6 +89,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.gwenvador.bullarr.data.CoverLoader
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.AutoStories
 import kotlin.math.abs
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.outlined.Bolt
@@ -158,9 +160,16 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         ItemActions.setSeriesTags(api, summary.id, tags)
         vm.updateSeriesRow(summary.id) { row -> row.copy(tags = tags) }
     }
+    var refreshing by remember { mutableStateOf(false) }
+    // Avancement Komga de chaque tome (comme le site), relu à chaque rechargement et en sortant du lecteur.
+    var komga by remember(summary.id) { mutableStateOf<Map<Int, io.github.gwenvador.bullarr.data.KomgaVolumeProgress>>(emptyMap()) }
     LaunchedEffect(summary.id, attempt) {
         error = null
         try { detail = parseSeriesDetail(api.getObject("api/series/${summary.id}")) } catch (e: Exception) { error = e.readable() }
+        refreshing = false
+    }
+    LaunchedEffect(summary.id, attempt, vm.progressVersion) {
+        runCatching { io.github.gwenvador.bullarr.data.loadSeriesKomgaProgress(api, summary.id) }.onSuccess { komga = it }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -178,6 +187,12 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         val d = detail
         LaunchedEffect(d) { if (d != null) vm.offline.adopt(d.id, d.volumes.filter { it.owned }.map { it.id to it.label }) }
         if (d == null && error == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+        // Tirer la liste vers le bas recharge la fiche.
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { refreshing = true; attempt++ },
+            modifier = Modifier.fillMaxSize(),
+        ) {
         LazyColumn(
             Modifier.fillMaxSize().pointerInput(summary.id) {
                 detectHorizontalDragGestures(
@@ -242,7 +257,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     }
                     if (grouped.size == 1 || key !in collapsed) items(list, key = { it.id }) { v ->
                         VolumeItem(
-                            v, vm.coverUrl(v.coverPath), onOpen = { shown = v }, onLongClick = { menu = v }, offline = vm.offline.isDownloaded(v.id),
+                            v, vm.coverUrl(v.coverPath), onOpen = { shown = v }, onLongClick = { menu = v }, offline = vm.offline.isDownloaded(v.id), reading = komga[v.id],
                             offlineIcon = if (v.owned) ({ OfflineIcon(vm, v.id, "${d.title} · ${v.label}") }) else null,
                             onRead = if (v.owned) ({ vm.reading = ReaderTarget(v.id, "${d.title} · ${v.label}") }) else null,
                         ) {
@@ -257,6 +272,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     }
                 }
             }
+        }
         }
     }
     menu?.let { v ->
@@ -506,7 +522,7 @@ private fun Header(
 
 @Composable
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongClick: () -> Unit, offline: Boolean, offlineIcon: (@Composable () -> Unit)?, onRead: (() -> Unit)?, onSearch: () -> Unit) {
+private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongClick: () -> Unit, offline: Boolean, reading: io.github.gwenvador.bullarr.data.KomgaVolumeProgress?, offlineIcon: (@Composable () -> Unit)?, onRead: (() -> Unit)?, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = onLongClick).padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Cover(cover, 44.dp)
@@ -518,6 +534,18 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongC
             else listOfNotNull(v.year)
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             if (offline) IconTag(Icons.Outlined.OfflinePin, "Disponible hors ligne", cs.primary, "Téléchargé sur le téléphone")
+            // État de lecture Komga : « Lu » ou la page atteinte, avec une barre d'avancement.
+            reading?.let { r ->
+                if (r.completed) IconTag(Icons.Outlined.DoneAll, "Lu (Komga)", cs.onSurfaceVariant, "Lu")
+                else {
+                    val pages = r.pages ?: v.pageCount
+                    IconTag(Icons.Outlined.AutoStories, "En cours de lecture (Komga)", cs.tertiary, "p. ${r.page}" + (pages?.let { "/$it" } ?: ""))
+                    if (pages != null && pages > 0) LinearProgressIndicator(
+                        progress = { (r.page.toFloat() / pages).coerceIn(0f, 1f) },
+                        modifier = Modifier.width(120.dp).padding(top = 2.dp), color = cs.tertiary, trackColor = cs.surfaceVariant,
+                    )
+                }
+            }
         }
         Spacer(Modifier.width(8.dp))
         if (!v.owned) IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary)

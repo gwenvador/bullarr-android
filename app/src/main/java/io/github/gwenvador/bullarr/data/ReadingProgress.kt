@@ -8,6 +8,8 @@ import org.json.JSONObject
 data class RecentRead(
     val volumeId: Int, val seriesId: Int?, val seriesTitle: String?, val label: String?, val title: String?,
     val page: Int, val total: Int, val at: Long,
+    /** Couverture du tome (liste lue sur le serveur) ; sinon celle de la série. */
+    val coverPath: String? = null,
 )
 
 /** État de lecture d'un album, mémorisé sur l'appareil. */
@@ -42,7 +44,7 @@ class ReadingProgress(context: Context) {
 
     fun setRtl(seriesId: Int?, value: Boolean) { seriesId?.let { prefs.edit().putBoolean("rtl_$it", value).apply() } }
 
-    /** Albums commencés et pas finis, du plus récent au plus ancien. */
+    /** Albums commencés et pas finis, du plus récent au plus ancien (liste de secours quand Komga n'est pas joignable). */
     fun recent(): List<RecentRead> = runCatching {
         val a = JSONArray(prefs.getString("recent", "[]"))
         (0 until a.length()).mapNotNull { i ->

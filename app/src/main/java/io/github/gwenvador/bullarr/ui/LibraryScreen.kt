@@ -3,6 +3,8 @@ package io.github.gwenvador.bullarr.ui
 import androidx.compose.material.icons.outlined.ReportProblem
 import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Book
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
@@ -235,13 +237,29 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
         if (sheet) LibraryFilterSheet(vm.series, filters, filtered.size, onChange = { vm.filters = it }, onDismiss = { sheet = false })
         if (vm.libraryLoading && vm.series.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
 
+        // « Continuer la lecture » lu dans Komga par le serveur, comme le site ; sans Komga (ou hors
+        // réseau), les albums commencés sur l'appareil. Tirer la liste resynchronise avec Komga.
+        var keepTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        var syncFirst by remember { androidx.compose.runtime.mutableStateOf(false) }
+        var syncing by remember { androidx.compose.runtime.mutableStateOf(false) }
+        LaunchedEffect(vm.selectedLibrary?.id, vm.progressVersion, keepTick) {
+            val api = vm.api ?: run { vm.keepReadingLocal = true; return@LaunchedEffect }
+            if (syncFirst) { syncFirst = false; syncing = true; runCatching { io.github.gwenvador.bullarr.data.syncKomgaReading(api) } }
+            runCatching { io.github.gwenvador.bullarr.data.loadKeepReading(api, vm.selectedLibrary?.id) }
+                .onSuccess { vm.keepReading = it; vm.keepReadingLocal = it == null }
+                .onFailure { if (vm.keepReading == null) vm.keepReadingLocal = true }
+            syncing = false
+        }
+        fun syncKeepReading() { syncFirst = true; keepTick++ }
         PullToRefreshBox(
             isRefreshing = vm.libraryLoading && vm.series.isNotEmpty(),
-            onRefresh = { vm.loadLibrary(force = true) },
+            onRefresh = { vm.loadLibrary(force = true); syncKeepReading() },
             modifier = Modifier.fillMaxSize(),
         ) {
             // Albums commencés : en tête, tant qu'aucune recherche, filtre ni sélection n'est en cours.
-            val recent = remember(vm.progressVersion) { vm.reads.recent() }
+            val local = remember(vm.progressVersion) { vm.reads.recent() }
+            // Pendant le premier chargement, rien plutôt que la liste de l'appareil (évite le saut 4 → 20).
+            val recent = vm.keepReading ?: if (vm.keepReadingLocal) local else emptyList()
             val showRecent = recent.isNotEmpty() && q.isBlank() && filters.isEmpty && selected.isEmpty()
             val header: @Composable () -> Unit = {
                 Column {
@@ -255,7 +273,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     if (!vm.libraryLoading && vm.libraryError == null && vm.libraries.isEmpty()) {
                         EmptyState("Aucune bibliothèque", "Créez-en une dans l'interface web de Bullarr.")
                     }
-                    if (showRecent) ContinueReading(vm, recent)
+                    if (showRecent) ContinueReading(vm, recent, syncing = syncing, onSync = if (vm.keepReading != null) ({ syncKeepReading() }) else null)
                     if (filtered.isEmpty() && vm.series.isNotEmpty()) Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         EmptyState("Aucun résultat", if (q.isNotBlank()) "pour « $q »" + (if (!filters.isEmpty) " avec ces filtres" else "") else "Aucune série ne correspond aux filtres.")
                         if (!filters.isEmpty) androidx.compose.material3.TextButton(onClick = { vm.filters = LibraryFilters() }) { Text("Réinitialiser les filtres") }
@@ -290,11 +308,29 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
 
 /** « Continuer la lecture » : les albums commencés, couverture et avancement ; un appui reprend la lecture. */
 @Composable
-private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.bullarr.data.RecentRead>) {
+private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.bullarr.data.RecentRead>, syncing: Boolean, onSync: (() -> Unit)?) {
     val cs = MaterialTheme.colorScheme
-    Column(Modifier.padding(top = 4.dp, bottom = 8.dp)) {
-        Text("Continuer la lecture", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    // Replié par défaut ; l'état est mémorisé sur l'appareil (changer de page ou relancer l'app le garde).
+    val prefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("library_ui", android.content.Context.MODE_PRIVATE)
+    var expanded by remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean("keep_reading_open", false)) }
+    Column(Modifier.padding(top = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded; prefs.edit().putBoolean("keep_reading_open", expanded).apply() }.padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Continuer la lecture", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(" · ${recent.size}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+            if (syncing) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            else if (onSync != null) IconButton(onClick = onSync, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Outlined.Sync, contentDescription = "Synchroniser avec Komga", tint = cs.onSurfaceVariant)
+            }
+            androidx.compose.material3.Icon(
+                if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
+                contentDescription = if (expanded) "Replier" else "Déplier", tint = cs.onSurfaceVariant,
+            )
+        }
+        if (expanded) LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(recent, key = { it.volumeId }) { r ->
                 val series = vm.series.firstOrNull { it.id == r.seriesId }
                 Column(
@@ -303,7 +339,7 @@ private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.b
                     },
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Cover(series?.coverPath?.let { vm.coverUrl(it) }, 92.dp)
+                    Cover((r.coverPath ?: series?.coverPath)?.let { vm.coverUrl(it) }, 92.dp)
                     androidx.compose.material3.LinearProgressIndicator(
                         progress = { ((r.page + 1).toFloat() / r.total.coerceAtLeast(1)).coerceIn(0f, 1f) },
                         modifier = Modifier.fillMaxWidth(), color = cs.primary, trackColor = cs.surfaceVariant,
@@ -313,6 +349,7 @@ private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.b
                 }
             }
         }
+        HorizontalDivider(Modifier.padding(top = 8.dp), color = cs.outlineVariant)
     }
 }
 

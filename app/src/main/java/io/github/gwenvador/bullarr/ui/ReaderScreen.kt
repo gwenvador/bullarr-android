@@ -145,8 +145,17 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
         error = null
         try {
             // Copie hors ligne : le lecteur démarre sans réseau.
-            meta = vm.offline.store.metaOf(target.volumeId)
-                ?: parseReaderMeta(target.volumeId, api.getObject("api/volumes/${target.volumeId}/reader"))
+            // En ligne, l'avancement Komga du serveur est repris même pour une copie hors ligne.
+            val stored = vm.offline.store.metaOf(target.volumeId)
+            meta = if (stored == null) parseReaderMeta(target.volumeId, api.getObject("api/volumes/${target.volumeId}/reader"))
+            else if (!online) stored
+            else try {
+                kotlinx.coroutines.withTimeout(3000) {
+                    val s = parseReaderMeta(target.volumeId, api.getObject("api/volumes/${target.volumeId}/reader"))
+                    stored.copy(resumePage = s.resumePage, readCompleted = s.readCompleted)
+                }
+            } catch (e: CancellationException) { if (e is kotlinx.coroutines.TimeoutCancellationException) stored else throw e }
+            catch (e: Exception) { stored }
         }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.readable() }
@@ -219,7 +228,12 @@ private fun Reader(
         }
         return
     }
-    val start = (progress.get(meta.volumeId) ?: 0).coerceIn(0, total - 1)
+    // Komga d'abord (synchronisé avec le site et les autres lecteurs), sinon la page mémorisée sur l'appareil.
+    val start = when {
+        meta.readCompleted -> 0
+        meta.resumePage != null -> meta.resumePage - 1
+        else -> progress.get(meta.volumeId) ?: 0
+    }.coerceIn(0, total - 1)
     val scope = rememberCoroutineScope()
     var bars by remember { mutableStateOf(true) }
     var barsTick by remember { mutableIntStateOf(0) }

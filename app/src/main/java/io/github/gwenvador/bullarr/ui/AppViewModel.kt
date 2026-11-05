@@ -85,6 +85,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Incrémenté à la fermeture du lecteur : les listes relisent l'état de lecture. */
     var progressVersion by mutableStateOf(0)
+
+    /** « Continuer la lecture » lu dans Komga, gardé d'une page à l'autre ; null tant qu'il n'est pas chargé. */
+    var keepReading by mutableStateOf<List<io.github.gwenvador.bullarr.data.RecentRead>?>(null)
+    /** Komga désactivé ou serveur injoignable : on montre les albums commencés sur l'appareil. */
+    var keepReadingLocal by mutableStateOf(false)
     val reads by lazy { io.github.gwenvador.bullarr.data.ReadingProgress(app) }
 
     /** Version installée (versionName) et build. */
