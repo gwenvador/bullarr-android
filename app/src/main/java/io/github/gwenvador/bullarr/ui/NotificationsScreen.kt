@@ -144,7 +144,7 @@ private fun EventsTable(vm: AppViewModel, reload: Any) {
         }
     }
 
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors()) {
         Column(Modifier.padding(vertical = 12.dp)) {
             Text("Événements", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
             Text(

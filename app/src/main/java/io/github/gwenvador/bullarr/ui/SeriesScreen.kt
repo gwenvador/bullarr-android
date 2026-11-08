@@ -1,6 +1,12 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.outlined.Link
+import io.github.gwenvador.bullarr.data.normalize
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ArrowDownward
@@ -26,6 +32,7 @@ import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.HourglassTop
 import androidx.compose.material.icons.outlined.Label
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.filled.Bookmark
@@ -58,6 +65,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.TravelExplore
+import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -90,6 +99,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.gwenvador.bullarr.data.CoverLoader
 import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoStories
 import kotlin.math.abs
 import androidx.compose.material3.TextButton
@@ -119,11 +129,16 @@ import io.github.gwenvador.bullarr.data.str
 @Composable
 fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, onSearch: (SearchContext) -> Unit) {
     val api = vm.api ?: return
-    var detail by remember(summary.id) { mutableStateOf<SeriesDetail?>(null) }
+    // Fiche déjà vue : affichée aussitôt depuis le cache mémoire, puis rafraîchie.
+    var detail by remember(summary.id) { mutableStateOf<SeriesDetail?>(vm.seriesDetailCache[summary.id]) }
     var error by remember(summary.id) { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var shown by remember { mutableStateOf<VolumeRow?>(null) }
     var sortKey by rememberSaveable { mutableStateOf("Numéro") }
+    // Loupe des albums : filtre la liste par nom (libellé, titre, fichier) ; menu radar : recherche de téléchargement.
+    var volFilterOpen by rememberSaveable { mutableStateOf(false) }
+    var volFilter by rememberSaveable { mutableStateOf("") }
+    var searchMenu by remember { mutableStateOf(false) }
     var sortDesc by rememberSaveable { mutableStateOf(false) }
     var status by rememberSaveable { mutableStateOf("Tous") }
     var format by rememberSaveable { mutableStateOf("Tous") }
@@ -138,6 +153,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     var editingSeries by remember { mutableStateOf(false) }
     var confirmDeleteSeries by remember { mutableStateOf(false) }
     var editingTags by remember { mutableStateOf(false) }
+    var aiTags by remember { mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     // Sections repliées, mémorisées par type (comme le web) : valable pour toutes les séries.
@@ -165,7 +181,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     var komga by remember(summary.id) { mutableStateOf<Map<Int, io.github.gwenvador.bullarr.data.KomgaVolumeProgress>>(emptyMap()) }
     LaunchedEffect(summary.id, attempt) {
         error = null
-        try { detail = parseSeriesDetail(api.getObject("api/series/${summary.id}")) } catch (e: Exception) { error = e.readable() }
+        try { detail = parseSeriesDetail(api.getObject("api/series/${summary.id}")).also { vm.seriesDetailCache[summary.id] = it } } catch (e: Exception) { error = e.readable() }
         refreshing = false
     }
     LaunchedEffect(summary.id, attempt, vm.progressVersion) {
@@ -215,6 +231,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                     onFavorite = { setList(isFavorite = it) },
                     onToRead = { setList(toReadLater = it) },
                     onEditTags = { editingTags = true },
+                    onAiTags = { aiTags = true; editingTags = true },
                     onTag = { tag ->
                         // Tag cliqué : la bibliothèque s'ouvre filtrée sur ce tag.
                         vm.filters = vm.filters.copy(tags = setOf(tag))
@@ -227,27 +244,59 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 val owned = d.volumes.count { it.owned }
                 item {
                     Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // « Albums » : tomes, intégrales, hors-séries, épisodes… réunis.
                         Text(
-                            "Tomes · $owned/${d.volumes.size}",
+                            "Albums · $owned/${d.volumes.size}",
                             style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
                         )
-                        IconButton(onClick = { onSearch(SearchContext(seriesId = d.id, seriesTitle = d.title, volumeId = null, volumeLabel = null, volumeNumber = null)) }) {
-                            Icon(Icons.Outlined.Search, contentDescription = "Chercher la série")
+                        IconButton(onClick = { volFilterOpen = !volFilterOpen; if (!volFilterOpen) volFilter = "" }) {
+                            Icon(Icons.Outlined.Search, contentDescription = "Filtrer les albums par nom", tint = if (volFilterOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Box {
+                            IconButton(onClick = { searchMenu = true }) { Icon(Icons.Outlined.TravelExplore, contentDescription = "Chercher la série") }
+                            androidx.compose.material3.DropdownMenu(expanded = searchMenu, onDismissRequest = { searchMenu = false }) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Chercher") },
+                                    leadingIcon = { Icon(Icons.Outlined.TravelExplore, contentDescription = null) },
+                                    onClick = {
+                                        searchMenu = false
+                                        onSearch(SearchContext(seriesId = d.id, seriesTitle = d.title, volumeId = null, volumeLabel = null, volumeNumber = null))
+                                    },
+                                )
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Recherche automatique") },
+                                    leadingIcon = { Icon(Icons.Outlined.Radar, contentDescription = null) },
+                                    onClick = {
+                                        searchMenu = false
+                                        // Même route que le site : POST /api/bedetheque/auto-acquire/run.
+                                        launchAction(scope, context, "Recherche automatique lancée") {
+                                            val res = api.postObject("api/bedetheque/auto-acquire/run", org.json.JSONObject().put("series_id", d.id))
+                                            if (!res.optBoolean("success", true)) throw io.github.gwenvador.bullarr.data.ApiException(res.str("error") ?: "Recherche automatique impossible")
+                                        }
+                                    },
+                                )
+                            }
                         }
                         VolumeOrdering(vm, d.volumes, sortKey, sortDesc, status, format,
                             onSort = { k -> if (sortKey == k) sortDesc = !sortDesc else { sortKey = k; sortDesc = k == "Taille" } },
                             onStatus = { status = it }, onFormat = { format = it })
                     }
                 }
-                if (d.volumes.isEmpty()) item { EmptyState("Aucun tome connu pour cette série") }
-                item {
-                    Text(
-                        "Touchez un tome pour sa fiche, maintenez pour les actions ; la loupe le cherche pour le télécharger.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                if (volFilterOpen) item(key = "vol-filter") {
+                    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+                    LaunchedEffect(Unit) { focus.requestFocus() }
+                    CompactSearchField(
+                        value = volFilter, onValueChange = { volFilter = it }, placeholder = "Nom de l'album…",
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).focusRequester(focus),
                     )
                 }
-                val grouped = volumeGroups(ordered(d.volumes, vm, sortKey, sortDesc, status, format), d.isOneshot)
+                if (d.volumes.isEmpty()) item { EmptyState("Aucun album connu pour cette série") }
+                val terms = normalize(volFilter).split(' ').filter { it.isNotBlank() }
+                val shownVolumes = ordered(d.volumes, vm, sortKey, sortDesc, status, format).filter { v ->
+                    terms.isEmpty() || normalize(listOfNotNull(v.label, v.title, v.filename).joinToString(" ")).let { k -> terms.all { it in k } }
+                }
+                if (terms.isNotEmpty() && shownVolumes.isEmpty()) item { EmptyState("Aucun album ne correspond") }
+                val grouped = volumeGroups(shownVolumes, d.isOneshot)
                 grouped.forEach { (key, list) ->
                     if (grouped.size > 1) item(key = "group-$key") {
                         VolumeGroupHeader(
@@ -293,7 +342,15 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     authorSheet?.let { (name, link) -> AuthorAlbumsSheet(vm, api, name, link, onDismiss = { authorSheet = null }) }
     if (showHistory) SeriesHistorySheet(api, summary.id, detail?.title ?: summary.title, onDismiss = { showHistory = false })
     if (editingTags) detail?.let { d ->
-        SeriesTagsDialog(d.tags, onDismiss = { editingTags = false }) { saveTags(it) }
+        SeriesTagsDialog(
+            d.tags, onDismiss = { editingTags = false; aiTags = false }, autoSuggest = aiTags,
+            onSuggest = {
+                api.postObject("api/ai/series/${d.id}/suggest", JSONObject()).optJSONArray("tags").let { a ->
+                    (0 until (a?.length() ?: 0)).mapNotNull { a!!.optString(it).ifBlank { null } }
+                }
+            },
+            onAiSettings = { vm.openSeries = null; vm.section = Section.Config; vm.subTab[Section.Config] = AI_CONFIG_TAB },
+        ) { saveTags(it) }
     }
     if (seriesMenu) SeriesActions(
         title = detail?.title ?: summary.title, onDismiss = { seriesMenu = false },
@@ -364,7 +421,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
 @Composable
 private fun Header(
     vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?, onToggleMonitor: (Boolean) -> Unit, onAuthor: (String) -> Unit,
-    onFavorite: (Boolean) -> Unit, onToRead: (Boolean) -> Unit, onEditTags: () -> Unit, onTag: (String) -> Unit, onTitleClick: () -> Unit,
+    onFavorite: (Boolean) -> Unit, onToRead: (Boolean) -> Unit, onEditTags: () -> Unit, onAiTags: () -> Unit, onTag: (String) -> Unit, onTitleClick: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var actionsOpen by rememberSaveable { mutableStateOf(false) }
@@ -442,66 +499,80 @@ private fun Header(
                     Spacer(Modifier.width(4.dp))
                     Text("Plus", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 }
-                // Une seule ligne défilante : statut, surveillance, hors ligne et liens.
-                if (actionsOpen) Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    d?.status?.let { st ->
-                        val l = st.lowercase()
-                        when {
-                            "cours" in l -> IconTag(Icons.Outlined.HourglassTop, "$st (série toujours publiée)", cs.tertiary)
-                            "termin" in l || "fini" in l -> IconTag(Icons.Outlined.TaskAlt, st, cs.secondary)
-                            "arrêt" in l || "stopp" in l || "abandon" in l -> IconTag(Icons.Outlined.Block, st, cs.error)
-                            else -> Tag(st, cs.secondaryContainer, cs.onSecondaryContainer)
-                        }
+            }
+        }
+        // Panneau « Plus » en pleine largeur sous l'en-tête : une ligne par sujet, libellé à gauche, contrôle à droite.
+        if (actionsOpen) {
+            val cs = MaterialTheme.colorScheme
+            val uri = androidx.compose.ui.platform.LocalUriHandler.current
+            val links = listOfNotNull(
+                d?.komgaUrl?.let { Triple("komga", "Komga", it) }, d?.bedethequeUrl?.let { Triple("bedetheque", "Bédéthèque", it) }, d?.ebdzUrl?.let { Triple("ebdz", "EBDZ", it) },
+            )
+            androidx.compose.material3.Card(
+            Modifier.fillMaxWidth(),
+            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = cs.surfaceContainer),
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                @Composable
+                fun PlusRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, content: @Composable () -> Unit) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(icon, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        content()
                     }
-                    // Boîte de 30 dp : le bouton ne réserve pas sa zone tactile de 48 dp, l'écart reste serré.
-                    if (d != null) Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                        WithTip(if (d.monitored) "Surveillée : toucher pour arrêter" else "Non surveillée : toucher pour surveiller") {
-                            IconButton(onClick = { onToggleMonitor(!d.monitored) }) {
-                                Icon(
-                                    if (d.monitored) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
-                                    contentDescription = if (d.monitored) "Surveillée" else "Non surveillée",
-                                    tint = if (d.monitored) cs.primary else cs.outline,
-                                )
-                            }
-                        }
+                }
+                d?.status?.let { st ->
+                    val l = st.lowercase()
+                    val (icon, color) = when {
+                        "cours" in l -> Icons.Outlined.HourglassTop to cs.tertiary
+                        "termin" in l || "fini" in l -> Icons.Outlined.TaskAlt to cs.secondary
+                        "arrêt" in l || "stopp" in l || "abandon" in l -> Icons.Outlined.Block to cs.error
+                        else -> Icons.Outlined.Info to cs.onSurfaceVariant
                     }
-                    if (d != null) {
-                        val owned = d.volumes.filter { it.owned }
+                    PlusRow(icon, "Statut") { Text(st, style = MaterialTheme.typography.labelLarge, color = color) }
+                }
+                if (d != null) PlusRow(if (d.monitored) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff, "Surveillance") {
+                    androidx.compose.material3.Switch(checked = d.monitored, onCheckedChange = { onToggleMonitor(it) }, modifier = Modifier.scale(0.7f).height(28.dp))
+                }
+                if (d != null) {
+                    val owned = d.volumes.filter { it.owned }
+                    if (owned.isNotEmpty()) {
                         val got = owned.count { vm.offline.isDownloaded(it.id) }
-                        if (got > 0) IconTag(
-                            Icons.Outlined.OfflinePin,
-                            if (got == owned.size) "Tout est disponible hors ligne" else "$got sur ${owned.size} hors ligne",
-                            cs.primary, if (owned.size == 1) "Téléchargé" else "$got/${owned.size} téléchargé(s)",
-                        )
-                    }
-                    if (d != null) Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                        SeriesOfflineIcon(vm, d.volumes.filter { it.owned }.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) })
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        links.forEach { (key, name, url) ->
-                            Logo(key, name, 22.dp, Modifier.clickable { runCatching { uri.openUri(url) } }, tip = false)
+                        PlusRow(Icons.Outlined.OfflinePin, "Hors ligne") {
+                            Text("$got/${owned.size}", style = MaterialTheme.typography.labelLarge, color = if (got > 0) cs.primary else cs.onSurfaceVariant)
+                            Spacer(Modifier.width(4.dp))
+                            SeriesOfflineIcon(vm, owned.map { OfflineVolume(it.id, "${d.title} · ${it.label}", it.pageCount) })
                         }
                     }
                 }
-                // Tags dans « Plus » avec le reste : chacun ouvre la bibliothèque filtrée, le crayon ouvre l'édition.
-                if (actionsOpen && d != null) androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                        WithTip("Modifier les tags") {
-                            IconButton(onClick = onEditTags) { Icon(Icons.Outlined.Label, contentDescription = "Modifier les tags", tint = cs.primary) }
+                if (links.isNotEmpty()) PlusRow(Icons.Outlined.Link, "Liens") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        links.forEach { (key, name, url) ->
+                            Logo(key, name, 24.dp, Modifier.clickable { runCatching { uri.openUri(url) } }, tip = true)
                         }
                     }
-                    d.tags.forEach { tag ->
-                        Tag(tag, cs.secondaryContainer, cs.onSecondaryContainer, Modifier.clickable { onTag(tag) })
+                }
+                if (d != null) {
+                    PlusRow(Icons.Outlined.Label, "Tags") {
+                        WithTip("Proposer des tags avec l'IA") {
+                            IconButton(onClick = onAiTags) { Icon(Icons.Outlined.AutoAwesome, contentDescription = "Proposer des tags avec l'IA", tint = cs.primary) }
+                        }
+                        WithTip("Modifier les tags") {
+                            IconButton(onClick = onEditTags) { Icon(Icons.Outlined.Edit, contentDescription = "Modifier les tags", tint = cs.primary) }
+                        }
+                    }
+                    if (d.tags.isEmpty()) Text("Aucun tag", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 32.dp, bottom = 8.dp))
+                    else androidx.compose.foundation.layout.FlowRow(
+                        Modifier.padding(start = 32.dp, bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        d.tags.forEach { tag -> TopicTag(tag, Modifier.clip(RoundedCornerShape(50)).clickable { onTag(tag) }) }
                     }
                 }
             }
+        }
         }
         d?.volumes?.filter { !it.owned && it.label != "Tome" && volumeGroup(it, d.isOneshot) == "volume" }
             ?.map { it.label.removePrefix("Tome ") }?.takeIf { it.isNotEmpty() }?.let { numbers ->
@@ -532,7 +603,8 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongC
             v.title?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             val meta = if (v.owned) listOfNotNull(v.format?.uppercase(), formatBytes(v.fileSize), v.pageCount?.let { "$it p." }, v.year)
             else listOfNotNull(v.year)
-            if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            // Une seule ligne : format, taille, pages, année tiennent à côté des boutons sans passer à la ligne.
+            if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (offline) IconTag(Icons.Outlined.OfflinePin, "Disponible hors ligne", cs.primary, "Téléchargé sur le téléphone")
             // État de lecture Komga : « Lu » ou la page atteinte, avec une barre d'avancement.
             reading?.let { r ->
@@ -547,7 +619,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongC
                 }
             }
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(4.dp))
         if (!v.owned) IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary)
         offlineIcon?.invoke()
         if (onRead != null) IconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire ce tome", tint = cs.primary) }
@@ -660,8 +732,9 @@ private fun VolumeGroupHeader(label: String, owned: Int, total: Int, collapsed: 
     ) {
         Icon(if (collapsed) Icons.Outlined.ChevronRight else Icons.Outlined.ExpandMore, contentDescription = if (collapsed) "Déplier" else "Replier", tint = cs.onSurfaceVariant)
         Spacer(Modifier.width(4.dp))
-        Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        Text("$owned / $total", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(8.dp))
+        Text("$owned/$total", style = MaterialTheme.typography.titleSmall, color = cs.primary)
     }
 }
 

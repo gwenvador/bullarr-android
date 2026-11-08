@@ -5,6 +5,13 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,10 +28,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BrightnessAuto
 import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import io.github.gwenvador.bullarr.ui.Icon
@@ -56,60 +65,75 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.gwenvador.bullarr.data.CoverLoader
 
-// Encre et papier de BD : rouge brique, papier crème le jour, nuit chaude la nuit.
-private val Light = lightColorScheme(
-    primary = Color(0xFFB3471F),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDBCC),
-    onPrimaryContainer = Color(0xFF3A0A00),
-    secondary = Color(0xFF2F5D7C),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFD3E6F5),
-    onSecondaryContainer = Color(0xFF0A2233),
-    tertiary = Color(0xFF6B6000),
-    tertiaryContainer = Color(0xFFF6E77A),
-    onTertiaryContainer = Color(0xFF201C00),
-    background = Color(0xFFFBF7F2),
-    onBackground = Color(0xFF221A15),
-    surface = Color(0xFFFBF7F2),
-    onSurface = Color(0xFF221A15),
-    surfaceVariant = Color(0xFFF1E4DA),
-    onSurfaceVariant = Color(0xFF53443C),
-    surfaceContainer = Color(0xFFF4EDE6),
-    surfaceContainerHigh = Color(0xFFEEE6DE),
-    outline = Color(0xFF85736A),
-    outlineVariant = Color(0xFFD8C2B8),
-    error = Color(0xFFBA1A1A),
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
+/**
+ * Palettes, identiques à celles du site (Configuration → Thème) : fond, surface, surface-alt,
+ * bordure, texte, texte atténué, accent, accent survol, en clair puis en sombre.
+ */
+class Tones(val bg: Long, val surface: Long, val alt: Long, val border: Long, val text: Long, val muted: Long, val accent: Long, val accentHover: Long)
+
+enum class Palette(val label: String, val light: Tones, val dark: Tones, val rounder: Boolean = false) {
+    Atelier("Atelier",
+        Tones(0xFFF2ECE1, 0xFFFFFDF8, 0xFFF7F2E9, 0xFFE0D2B8, 0xFF2B2318, 0xFF666666, 0xFFA8672A, 0xFF8A5220),
+        Tones(0xFF241F18, 0xFF2C261E, 0xFF342C22, 0xFF4D4335, 0xFFECE3D3, 0xFFA89A80, 0xFFC98A4B, 0xFFDBA066)),
+    Ardoise("Ardoise",
+        Tones(0xFFF4F6FB, 0xFFFFFFFF, 0xFFF8FAFD, 0xFFE3E8F1, 0xFF182033, 0xFF68738A, 0xFF6366F1, 0xFF4F46E5),
+        Tones(0xFF131826, 0xFF1B2132, 0xFF232A3E, 0xFF343D55, 0xFFE6E9F2, 0xFF97A0B5, 0xFF818CF8, 0xFFA5B4FC),
+        rounder = true),
+    Sauge("Sauge",
+        Tones(0xFFEEF2EC, 0xFFFBFDF9, 0xFFF3F7F0, 0xFFD3DFCD, 0xFF1D2A20, 0xFF5F6F62, 0xFF3F7D58, 0xFF2F6346),
+        Tones(0xFF161D18, 0xFF1D261F, 0xFF243028, 0xFF36473A, 0xFFE3ECE4, 0xFF95A898, 0xFF6FBF8E, 0xFF8FD4A8)),
+    Ocean("Océan",
+        Tones(0xFFEDF3F7, 0xFFFBFDFF, 0xFFF2F7FA, 0xFFD2E0EA, 0xFF132433, 0xFF5B7084, 0xFF0E7490, 0xFF0B5D73),
+        Tones(0xFF0F1A22, 0xFF15232D, 0xFF1B2C38, 0xFF2C4352, 0xFFE1EDF4, 0xFF8EA7B8, 0xFF22B8CF, 0xFF5FD0E0)),
+    Prune("Prune",
+        Tones(0xFFF5F0F4, 0xFFFFFCFE, 0xFFF9F3F8, 0xFFE6D6E3, 0xFF2A1A28, 0xFF6F5D6C, 0xFF9D3F86, 0xFF7F2F6C),
+        Tones(0xFF1D151C, 0xFF251B24, 0xFF2E222C, 0xFF473645, 0xFFF0E4EE, 0xFFAB98A8, 0xFFD47FBF, 0xFFE3A0D2));
+
+    fun tones(dark: Boolean) = if (dark) this.dark else light
+}
+
+/** Mélange [a] dans [b] à la proportion [t] (teintes claires : accent dans la surface, 10–30 %). */
+private fun mix(a: Color, b: Color, t: Float) = Color(
+    red = a.red * t + b.red * (1 - t), green = a.green * t + b.green * (1 - t), blue = a.blue * t + b.blue * (1 - t), alpha = 1f,
 )
 
-private val Dark = darkColorScheme(
-    primary = Color(0xFFFFB596),
-    onPrimary = Color(0xFF5E1700),
-    primaryContainer = Color(0xFF8A3210),
-    onPrimaryContainer = Color(0xFFFFDBCC),
-    secondary = Color(0xFF9BCBEE),
-    onSecondary = Color(0xFF003450),
-    secondaryContainer = Color(0xFF1C4A68),
-    onSecondaryContainer = Color(0xFFD3E6F5),
-    tertiary = Color(0xFFD9CA61),
-    tertiaryContainer = Color(0xFF514800),
-    onTertiaryContainer = Color(0xFFF6E77A),
-    background = Color(0xFF17130F),
-    onBackground = Color(0xFFEDE0D8),
-    surface = Color(0xFF17130F),
-    onSurface = Color(0xFFEDE0D8),
-    surfaceVariant = Color(0xFF53443C),
-    onSurfaceVariant = Color(0xFFD8C2B8),
-    surfaceContainer = Color(0xFF231D19),
-    surfaceContainerHigh = Color(0xFF2E2723),
-    outline = Color(0xFFA08D84),
-    outlineVariant = Color(0xFF53443C),
-    error = Color(0xFFFFB4AB),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
-)
+fun colorSchemeOf(p: Palette, dark: Boolean): androidx.compose.material3.ColorScheme {
+    val t = p.tones(dark)
+    val bg = Color(t.bg); val surface = Color(t.surface); val alt = Color(t.alt); val border = Color(t.border)
+    val text = Color(t.text); val muted = Color(t.muted); val accent = Color(t.accent); val hover = Color(t.accentHover)
+    val onAccent = if (dark) bg else Color.White
+    return if (dark) darkColorScheme(
+        primary = accent, onPrimary = onAccent,
+        primaryContainer = mix(accent, surface, 0.30f), onPrimaryContainer = text,
+        secondary = hover, onSecondary = onAccent,
+        secondaryContainer = mix(accent, surface, 0.18f), onSecondaryContainer = text,
+        tertiary = Color(0xFFD9CA61), onTertiary = Color(0xFF363100),
+        tertiaryContainer = Color(0xFF514800), onTertiaryContainer = Color(0xFFF6E77A),
+        background = bg, onBackground = text, surface = bg, onSurface = text,
+        surfaceVariant = alt, onSurfaceVariant = muted,
+        surfaceContainerLowest = bg, surfaceContainerLow = surface, surfaceContainer = surface,
+        surfaceContainerHigh = alt, surfaceContainerHighest = surface,
+        surfaceBright = alt, surfaceDim = bg, surfaceTint = accent,
+        inverseSurface = text, inverseOnSurface = bg, inversePrimary = Color(p.light.accent),
+        outline = muted, outlineVariant = border,
+        error = Color(0xFFFFB4AB), onError = Color(0xFF690005), errorContainer = Color(0xFF93000A), onErrorContainer = Color(0xFFFFDAD6),
+    ) else lightColorScheme(
+        primary = accent, onPrimary = onAccent,
+        primaryContainer = mix(accent, surface, 0.22f), onPrimaryContainer = text,
+        secondary = hover, onSecondary = onAccent,
+        secondaryContainer = mix(accent, surface, 0.12f), onSecondaryContainer = text,
+        tertiary = Color(0xFF6B6000), onTertiary = Color.White,
+        tertiaryContainer = Color(0xFFF6E77A), onTertiaryContainer = Color(0xFF201C00),
+        background = bg, onBackground = text, surface = bg, onSurface = text,
+        surfaceVariant = alt, onSurfaceVariant = muted,
+        surfaceContainerLowest = surface, surfaceContainerLow = surface, surfaceContainer = alt,
+        surfaceContainerHigh = alt, surfaceContainerHighest = surface,
+        surfaceBright = surface, surfaceDim = bg, surfaceTint = accent,
+        inverseSurface = text, inverseOnSurface = bg, inversePrimary = Color(p.dark.accent),
+        outline = muted, outlineVariant = border,
+        error = Color(0xFFBA1A1A), onError = Color.White, errorContainer = Color(0xFFFFDAD6), onErrorContainer = Color(0xFF410002),
+    )
+}
 
 /** Thème choisi dans l'app : suivre le téléphone, toujours clair ou toujours sombre. Mémorisé sur l'appareil. */
 enum class ThemeMode(val label: String) { System("Système"), Light("Clair"), Dark("Sombre") }
@@ -117,11 +141,18 @@ enum class ThemeMode(val label: String) { System("Système"), Light("Clair"), Da
 object ThemePref {
     private var prefs: android.content.SharedPreferences? = null
     var mode by mutableStateOf(ThemeMode.System); private set
+    var palette by mutableStateOf(Palette.Atelier); private set
 
     fun init(context: android.content.Context) {
         if (prefs != null) return
         prefs = context.applicationContext.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
         mode = runCatching { ThemeMode.valueOf(prefs!!.getString("theme", null) ?: "System") }.getOrDefault(ThemeMode.System)
+        palette = runCatching { Palette.valueOf(prefs!!.getString("palette", null) ?: "Atelier") }.getOrDefault(Palette.Atelier)
+    }
+
+    fun choosePalette(value: Palette) {
+        palette = value
+        prefs?.edit()?.putString("palette", value.name)?.apply()
     }
 
     fun set(value: ThemeMode) {
@@ -146,7 +177,14 @@ fun BullarrTheme(content: @Composable () -> Unit) {
             isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
+    val palette = ThemePref.palette
+    val scheme = remember(palette, dark) { colorSchemeOf(palette, dark) }
+    // Ardoise : coins plus arrondis, comme sur le site.
+    val shapes = if (palette.rounder) androidx.compose.material3.Shapes(
+        extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(16.dp),
+        large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(32.dp),
+    ) else androidx.compose.material3.Shapes()
+    MaterialTheme(colorScheme = scheme, shapes = shapes, content = content)
 }
 
 /** Onglet Configuration → Apparence : réglages propres à l'app sur ce téléphone. */
@@ -157,10 +195,58 @@ fun AppearanceScreen() {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         ThemePicker()
+        Spacer(Modifier.height(8.dp))
+        PalettePicker()
         Text(
-            "« Système » suit le mode clair ou sombre du téléphone. Ce réglage est propre à cet appareil.",
+            "« Système » suit le mode clair ou sombre du téléphone. Ces réglages sont propres à cet appareil.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** Choix de la palette (les mêmes que sur le site), avec un aperçu dans le mode clair/sombre courant. */
+@Composable
+fun PalettePicker(modifier: Modifier = Modifier) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Couleurs", style = MaterialTheme.typography.titleSmall)
+        Palette.entries.forEach { p ->
+            val t = p.tones(dark)
+            val selected = ThemePref.palette == p
+            val cs = MaterialTheme.colorScheme
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .border(if (selected) 2.dp else 1.dp, if (selected) cs.primary else cs.outlineVariant, RoundedCornerShape(14.dp))
+                    .clickable { ThemePref.choosePalette(p) }.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Aperçu : le fond, une carte, une ligne de texte et un bouton à l'accent.
+                Box(
+                    Modifier.size(92.dp, 56.dp).clip(RoundedCornerShape(if (p.rounder) 12.dp else 8.dp)).background(Color(t.bg))
+                        .border(1.dp, Color(t.border), RoundedCornerShape(if (p.rounder) 12.dp else 8.dp)).padding(7.dp),
+                ) {
+                    Column(
+                        Modifier.fillMaxSize().clip(RoundedCornerShape(if (p.rounder) 8.dp else 5.dp)).background(Color(t.surface)).padding(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Box(Modifier.width(44.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(Color(t.text)))
+                        Box(Modifier.width(30.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(t.muted)))
+                        Box(Modifier.width(26.dp).height(8.dp).clip(RoundedCornerShape(4.dp)).background(Color(t.accent)))
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(p.label, style = MaterialTheme.typography.titleSmall, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        listOf(t.accent, t.accentHover, t.alt, t.border).forEach {
+                            Box(Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(it))
+                                .border(1.dp, cs.outlineVariant, androidx.compose.foundation.shape.CircleShape))
+                        }
+                    }
+                }
+                if (selected) Icon(Icons.Outlined.CheckCircle, contentDescription = "Palette choisie", tint = cs.primary)
+            }
+        }
     }
 }
 
@@ -214,14 +300,16 @@ fun ErrorCard(message: String, modifier: Modifier = Modifier, onRetry: (() -> Un
 }
 
 @Composable
-fun EmptyState(title: String, detail: String? = null, modifier: Modifier = Modifier) {
+fun EmptyState(title: String, detail: String? = null, modifier: Modifier = Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Outlined.Inbox) {
     Column(
         modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        if (detail != null) Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Icône discrète au-dessus du message : un écran vide se lit d'un coup d'œil.
+        androidx.compose.material3.Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(48.dp).padding(bottom = 4.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (detail != null) Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
@@ -231,6 +319,23 @@ fun Tag(text: String, container: Color, content: Color, modifier: Modifier = Mod
         Text(
             text, fontSize = 11.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/** Tag de série : pastille discrète bordée, « # » en couleur d'accent. */
+@Composable
+fun TopicTag(text: String, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        color = Color.Transparent, contentColor = cs.onSurface, shape = RoundedCornerShape(50),
+        border = androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant), modifier = modifier,
+    ) {
+        Text(
+            androidx.compose.ui.text.buildAnnotatedString {
+                pushStyle(androidx.compose.ui.text.SpanStyle(color = cs.primary)); append("#"); pop(); append(text)
+            },
+            fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
     }
 }
@@ -258,9 +363,88 @@ fun Cover(url: String?, width: Dp, modifier: Modifier = Modifier) {
 }
 
 /**
- * Champ texte avec une croix pour l'effacer dès qu'il contient quelque chose.
- * [trailing] s'ajoute après la croix (ex. œil de la clé API).
+ * Fond des champs de saisie : gris neutre (pas la teinte brune du thème). Sur une carte, un peu
+ * plus foncé que la carte ; sur le fond de page, un peu plus clair.
  */
+@Composable
+fun fieldColor(onCard: Boolean = false): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return when {
+        dark && onCard -> Color(0xFF1E1E21)
+        dark -> Color(0xFF2B2B2F)
+        onCard -> Color(0xFFF1F1F3)
+        else -> Color(0xFFE9E9EC)
+    }
+}
+
+/**
+ * Champ de saisie des formulaires : libellé au-dessus, case arrondie de 44 dp sur un fond plus
+ * sombre que la carte (pas de grand cadre), liseré de la couleur principale quand il a le focus.
+ * [password] : texte masqué avec un œil pour l'afficher.
+ */
+@Composable
+fun FormField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    placeholder: String? = null,
+    password: Boolean = false,
+    clearable: Boolean = false,
+    singleLine: Boolean = true,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    supportingText: String? = null,
+    visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+) {
+    val cs = MaterialTheme.colorScheme
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    var shown by remember { mutableStateOf(false) }
+    val transformation = if (password && !shown) androidx.compose.ui.text.input.PasswordVisualTransformation() else visualTransformation
+    val shape = RoundedCornerShape(12.dp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        label?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = if (focused) cs.primary else cs.onSurfaceVariant) }
+        androidx.compose.foundation.text.BasicTextField(
+            value = value, onValueChange = onValueChange, singleLine = singleLine,
+            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, visualTransformation = transformation,
+            interactionSource = interaction,
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = cs.onSurface),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(cs.primary),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            decorationBox = { inner ->
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(fieldColor(onCard = true))
+                        .border(if (focused) 1.5.dp else 0.dp, if (focused) cs.primary else androidx.compose.ui.graphics.Color.Transparent, shape)
+                        .padding(start = if (leadingIcon != null) 4.dp else 14.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    leadingIcon?.let { Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { it() } }
+                    Box(Modifier.weight(1f).padding(vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty() && placeholder != null) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = cs.onSurfaceVariant.copy(alpha = 0.7f), maxLines = 1)
+                        inner()
+                    }
+                    if (clearable && value.isNotEmpty()) IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Outlined.Clear, contentDescription = "Effacer", tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    }
+                    if (password) IconButton(onClick = { shown = !shown }, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            if (shown) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                            contentDescription = if (shown) "Masquer" else "Afficher", tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    trailing?.invoke()
+                    if (!clearable && !password && trailing == null) Spacer(Modifier.width(10.dp))
+                }
+            },
+        )
+        supportingText?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+    }
+}
+
+/** Champ des réglages (même style que [FormField]) avec une croix pour l'effacer. */
 @Composable
 fun ClearableField(
     value: String,
@@ -274,30 +458,11 @@ fun ClearableField(
     visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
     keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
     keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
-) {
-    androidx.compose.material3.OutlinedTextField(
-        value = value, onValueChange = onValueChange, modifier = modifier, singleLine = true,
-        label = label?.let { { Text(it) } },
-        placeholder = placeholder?.let { { Text(it) } },
-        leadingIcon = leadingIcon,
-        trailingIcon = if (value.isEmpty() && trailing == null) null else {
-            {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (value.isNotEmpty()) {
-                        IconButton(onClick = { onValueChange("") }) {
-                            Icon(androidx.compose.material.icons.Icons.Outlined.Clear, contentDescription = "Effacer")
-                        }
-                    }
-                    trailing?.invoke()
-                }
-            }
-        },
-        supportingText = supportingText?.let { { Text(it) } },
-        visualTransformation = visualTransformation,
-        keyboardOptions = keyboardOptions,
-        keyboardActions = keyboardActions,
-    )
-}
+) = FormField(
+    value, onValueChange, modifier, label = label, placeholder = placeholder, clearable = true, leadingIcon = leadingIcon,
+    trailing = trailing, supportingText = supportingText, visualTransformation = visualTransformation,
+    keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
+)
 
 /** Champ de recherche compact (40 dp) : loupe, texte, croix pour effacer. Pour les listes denses. */
 @Composable
@@ -311,15 +476,20 @@ fun CompactSearchField(
     keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
 ) {
     val cs = MaterialTheme.colorScheme
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(10.dp)
     androidx.compose.foundation.text.BasicTextField(
         value = value, onValueChange = onValueChange, singleLine = true,
-        keyboardOptions = keyboardOptions, keyboardActions = keyboardActions,
+        keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, interactionSource = interaction,
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = cs.onSurface),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(cs.primary),
         modifier = modifier.fillMaxWidth().height(40.dp),
         decorationBox = { inner ->
             Row(
-                Modifier.fillMaxSize().background(cs.surfaceVariant, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp),
+                Modifier.fillMaxSize().clip(shape).background(fieldColor())
+                    .border(1.dp, if (focused) cs.primary else cs.outlineVariant.copy(alpha = 0.5f), shape)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (showIcon) {

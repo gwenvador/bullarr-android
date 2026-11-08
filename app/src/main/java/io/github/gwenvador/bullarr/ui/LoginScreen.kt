@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
+fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedded: Boolean = false) {
     var url by remember { mutableStateOf(vm.settings.serverUrl.ifBlank { vm.settings.lastUrl }) }
     var key by remember { mutableStateOf(vm.settings.apiKey) }
     var mode by remember { mutableStateOf(vm.settings.authMode) }
@@ -75,7 +75,8 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        if (embedded) Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+        else Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (firstRun) {
@@ -90,7 +91,7 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
             )
             Text("Pilotez votre collection de BD depuis le téléphone.", style = MaterialTheme.typography.bodyLarge)
         } else {
-            Text("Connexion", style = MaterialTheme.typography.headlineSmall)
+            Text("Connexion de l'app", style = MaterialTheme.typography.titleLarge)
         }
 
         ClearableField(
@@ -263,7 +264,6 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
                 Spacer(Modifier.size(8.dp))
                 Text("Se déconnecter", color = MaterialTheme.colorScheme.error)
             }
-            UpdateCard(vm)
         }
     }
 }

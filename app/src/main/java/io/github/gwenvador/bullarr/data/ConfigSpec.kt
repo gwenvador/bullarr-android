@@ -89,8 +89,14 @@ val CLIENTS = listOf(
     ),
     Integration(
         "komga", "Komga", "api/komga/config",
-        listOf(ENABLED, FText("url", "URL", "komga.exemple.fr", url = true), FSecret("api_key", "Clé API")),
+        listOf(
+            ENABLED,
+            FText("url", "URL", "https://komga.exemple.fr", url = true),
+            FSecret("api_key", "Clé API"),
+            FSwitch("sync_read_progress", "Synchroniser la lecture", "Avancement de lecture partagé entre Komga et Bullarr."),
+        ),
         TestCall(true, "api/komga/test"),
+        help = "Compte Komga du serveur (administrateur). Chaque lecteur peut relier son propre compte dans ses Réglages → Intégrations.",
     ),
 )
 
@@ -212,8 +218,6 @@ val MONITOR = listOf(
         "monitor", "Surveillance des volumes", "api/missing-monitor/config",
         listOf(
             FSwitch("monitor_missing_volumes.enabled", "Volumes manquants", "Valable pour les séries activées dans Actions → Surveillance."),
-            FChoice("monitor_missing_volumes.action", "Quand un fichier correspond à un tome manquant",
-                listOf("download" to "Télécharger automatiquement", "notify" to "Notifier sur Telegram")),
             FSwitch("quality_upgrade.enabled", "Upgrade de qualité", "Remplace un fichier par un meilleur."),
             FNumber("quality_upgrade.min_size_increase_percent", "Augmentation de taille minimale (%)"),
         ),
@@ -291,7 +295,7 @@ fun buildPayload(spec: Integration, fresh: JSONObject, initial: Map<String, Any>
 /** Accès à Bullarr (mot de passe, SSO). La clé API reste valable quel que soit le mode. */
 val ACCESS = listOf(
     Integration(
-        "login", "Connexion à Bullarr", "api/auth/config",
+        "login", "Authentification du serveur", "api/auth/config",
         listOf(
             FChoice("mode", "Authentification", listOf("none" to "Aucune", "password" to "Mot de passe", "oidc" to "SSO (OIDC)", "both" to "Mot de passe + SSO")),
             FText("username", "Identifiant"),

@@ -177,6 +177,9 @@ data class SeriesSummary(
     /** Listes personnelles : « à lire plus tard » et « favori ». */
     val toReadLater: Boolean = false,
     val isFavorite: Boolean = false,
+    /** Recherche par nom (titre, auteur, univers) et par tags, séparément. */
+    val nameKey: String = "",
+    val tagsKey: String = "",
 )
 
 /** Anciens (Europe, USA, Asie) et nouveaux (Franco-Belge, Comics, Manga) libellés d'origine de Bédéthèque → un seul jeu. */
@@ -211,6 +214,8 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         isOneshot = it.bool("is_oneshot") == true,
         // Un tag se cherche avec ou sans tiret : « chat-surdoue » trouve aussi « chat surdoué ».
         searchKey = normalize("$title ${author ?: ""} ${it.str("universe_name") ?: ""} ${tags.joinToString(" ") { t -> "$t ${t.replace('-', ' ')}" }}"),
+        nameKey = normalize("$title ${author ?: ""} ${it.str("universe_name") ?: ""}"),
+        tagsKey = normalize(tags.joinToString(" ") { t -> "$t ${t.replace('-', ' ')}" }),
         isIntegral = it.bool("oneshot_is_integral") == true,
         origin = canonicalOrigin(it.str("bedetheque_origin")),
         yearInt = it.str("year")?.toIntOrNull(),
@@ -218,7 +223,8 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         volumeCount = listOf("owned_tomes", "owned_integrals", "owned_hs", "owned_episodes", "owned_specials").sumOf { k -> it.int(k) ?: 0 },
         sizeBytes = it.long("total_size"),
         votes = it.int("total_votes") ?: 0,
-        genres = it.str("local_genre")?.split(',')?.map { g -> g.trim() }?.filter { g -> g.isNotEmpty() }.orEmpty(),
+        // « genre » : genre effectif renvoyé par le serveur (manuel, Bédéthèque ou local) ; local_genre pour les anciens serveurs.
+        genres = (it.str("genre") ?: it.str("local_genre"))?.split(',')?.map { g -> g.trim() }?.filter { g -> g.isNotEmpty() }.orEmpty(),
         tags = tags,
         toReadLater = it.bool("to_read_later") == true,
         isFavorite = it.bool("is_favorite") == true,

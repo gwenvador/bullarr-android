@@ -6,6 +6,7 @@ import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -31,6 +32,23 @@ class SessionAuth(
     val onCookie: (String) -> Unit = {},
 ) {
     @Volatile var csrf: String? = null
+
+    /**
+     * Reprend les cookies renvoyés par Bullarr. La session Flask est un cookie signé qui change
+     * quand le serveur y écrit (jeton CSRF, rôle…) : garder l'ancien ferait perdre le jeton CSRF
+     * et refuser toutes les requêtes d'écriture (403 « jeton de sécurité »).
+     */
+    fun absorb(setCookies: List<String>) {
+        if (setCookies.isEmpty()) return
+        val jar = LinkedHashMap<String, String>()
+        cookie.split(';').map { it.trim() }.filter { '=' in it }.forEach { jar[it.substringBefore('=')] = it }
+        setCookies.map { it.substringBefore(';').trim() }.filter { '=' in it }.forEach { c ->
+            val name = c.substringBefore('=')
+            if (c.substringAfter('=').isEmpty()) jar.remove(name) else jar[name] = c
+        }
+        val merged = jar.values.joinToString("; ")
+        if (merged.isNotBlank() && merged != cookie) { cookie = merged; onCookie(merged) }
+    }
 }
 
 /**
@@ -92,7 +110,7 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
             val detail = runCatching { extractError(JSONObject(text)) }.getOrNull()
                 ?: if (resp.isSuccessful) "réponse inattendue (type $type au lieu d'une image)" else "erreur HTTP ${resp.code}"
             val hint = when (resp.code) {
-                401 -> "\nVérifiez la clé API ou la session (Configuration → Connexion)."
+                401 -> "\nVérifiez la clé API ou la session (Réglages → Accès)."
                 in 500..599 -> "\nErreur interne de Bullarr (HTTP ${resp.code})."
                 else -> ""
             }
@@ -102,6 +120,16 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
 
     private suspend fun execute(method: String, path: String, query: Map<String, String>, body: JSONObject?): Any =
         withAuthRetry { executeOnce(method, path, query, body) }
+
+    /** Envoi d'un fichier (formulaire multipart), par ex. la photo de profil ; [fields] : champs texte en plus. */
+    suspend fun postMultipart(path: String, field: String, filename: String, bytes: ByteArray, mime: String, fields: Map<String, String> = emptyMap()): JSONObject =
+        withAuthRetry {
+            val form = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM).apply {
+                fields.forEach { (k, v) -> addFormDataPart(k, v) }
+                addFormDataPart(field, filename, bytes.toRequestBody(mime.toMediaTypeOrNull()))
+            }.build()
+            executeOnce("POST", path, emptyMap(), null, form)
+        } as? JSONObject ?: throw ApiException("POST $path : réponse inattendue (un objet JSON était attendu).")
 
     /**
      * Session (identifiant ou SSO) : un 401 relance une connexion par mot de passe si les
@@ -118,7 +146,7 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
             }
             e.httpCode == 403 && e.message.orEmpty().contains("sécurité") -> { s.csrf = null; block() }
             e.httpCode == 401 -> throw ApiException(
-                (e.message ?: "") + "\nSession expirée : reconnectez-vous (Configuration → Connexion).", 401)
+                (e.message ?: "") + "\nSession expirée : reconnectez-vous (Réglages → Accès).", 401)
             else -> throw e
         }
     }
@@ -202,13 +230,15 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
             client.newCall(req).execute().use { r ->
                 val body = r.body?.string().orEmpty()
                 if (!r.isSuccessful) throw ApiException("GET /api/auth/csrf : HTTP ${r.code}", r.code)
+                // Le jeton est rangé dans la session : le cookie qui le contient remplace l'ancien.
+                s.absorb(r.headers("Set-Cookie"))
                 return JSONObject(body).optString("token").ifBlank { throw ApiException("GET /api/auth/csrf : jeton absent.") }
             }
         } catch (e: IOException) { throw ApiException(networkMessage(e, url)) }
         catch (e: JSONException) { throw ApiException("GET /api/auth/csrf : réponse illisible.") }
     }
 
-    private suspend fun executeOnce(method: String, path: String, query: Map<String, String>, body: JSONObject?): Any =
+    private suspend fun executeOnce(method: String, path: String, query: Map<String, String>, body: JSONObject?, raw: okhttp3.RequestBody? = null): Any =
         withContext(Dispatchers.IO) {
             val url = baseUrl.newBuilder().apply {
                 addPathSegments(path.trimStart('/'))
@@ -216,7 +246,8 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
             }.build()
             val builder = Request.Builder().url(url).header("Accept", "application/json")
             applyAuth(builder, method)
-            if (body != null) builder.method(method, body.toString().toRequestBody(JSON))
+            if (raw != null) builder.method(method, raw)
+            else if (body != null) builder.method(method, body.toString().toRequestBody(JSON))
             else builder.method(method, null)
 
             val label = "$method /${path.trimStart('/')}"
@@ -226,6 +257,7 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
                 throw ApiException(networkMessage(e, url))
             }
             response.use { resp ->
+                if (apiKey.isBlank()) session?.absorb(resp.headers("Set-Cookie"))
                 val text = try { resp.body?.string().orEmpty() } catch (e: IOException) {
                     throw ApiException("$label : lecture de la réponse interrompue (${e.message ?: e.javaClass.simpleName}).")
                 }

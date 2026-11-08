@@ -1,5 +1,10 @@
 package io.github.gwenvador.bullarr.ui
 
+import io.github.gwenvador.bullarr.data.dbl
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.outlined.Apps
@@ -30,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Search
@@ -87,6 +93,8 @@ private fun kindIcon(kind: String) = when (kind) {
     "Tome supprimé" -> Icons.Outlined.Delete
     "Tome déplacé" -> Icons.Outlined.DriveFileMove
     "Conversion" -> Icons.Outlined.Autorenew
+    "IA" -> Icons.Outlined.AutoAwesome
+    "Comptes" -> Icons.Outlined.Person
     else -> Icons.Outlined.Apps
 }
 
@@ -114,15 +122,17 @@ private data class Row3(
     val client: String? = null,
     /** Opération d'import : sa série se lit dans son détail (les fichiers portent la série). */
     val operationId: String? = null,
+    /** Traitement de l'historique IA : tags ajoutés par série. */
+    val ai: org.json.JSONObject? = null,
 )
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit, onLongClick: () -> Unit = {}) {
+private fun SimpleRow(r: Row3, onOpenSeries: (Int, String) -> Unit, onLongClick: () -> Unit = {}, onClick: (() -> Unit)? = null) {
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxWidth()
-            .combinedClickable(onClick = { r.seriesId?.let { onOpenSeries(it, r.seriesTitle ?: r.title) } }, onLongClick = onLongClick)
+            .combinedClickable(onClick = { onClick?.invoke() ?: r.seriesId?.let { onOpenSeries(it, r.seriesTitle ?: r.title) } }, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -189,8 +199,72 @@ private suspend fun loadHistory(api: BullarrApi, seriesId: Int?, errors: Mutable
                     }
                 }
             },
+            async {
+                part("IA") {
+                    // Dates de l'historique IA en secondes epoch ; les autres sources sont en UTC « aaaa-MM-jj HH:mm:ss ».
+                    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                    api.getObject("api/ai/history", seriesId?.let { mapOf("series_id" to "$it") } ?: emptyMap()).optJSONArray("entries").objects().mapNotNull { e ->
+                        val details = e.optJSONArray("details").objects()
+                        // Historique d'une série : seulement les traitements qui l'ont touchée, avec ses seuls tags.
+                        val mine = seriesId?.let { id -> details.filter { it.int("series_id") == id }.ifEmpty { return@mapNotNull null } }
+                        val entry = if (mine != null) org.json.JSONObject(e.toString()).put("details", org.json.JSONArray(mine)).put("details_total", mine.size) else e
+                        val shown = mine ?: details
+                        val single = shown.singleOrNull()?.takeIf { it.has("series_id") }
+                        val tags = single?.optJSONArray("added")?.let { a -> (0 until a.length()).joinToString(", ") { a.optString(it) } }?.ifBlank { null }
+                        Row3(
+                            "IA", aiKindLabel(e),
+                            listOfNotNull(e.str("message")?.ifBlank { null }, tags, e.str("model")).joinToString(" · ").ifBlank { null },
+                            e.dbl("finished_at")?.let { fmt.format(java.util.Date((it * 1000).toLong())) },
+                            e.str("status").let { if (it == "error") false else if (it == "done") true else null },
+                            single?.int("series_id"), single?.str("title"), ai = entry,
+                        )
+                    }
+                }
+            },
+            async {
+                // Journal des comptes (connexions, comptes, demandes de BD, avatars) : administrateurs seulement.
+                part("Comptes") {
+                    api.getObject("api/auth/activity", mapOf("limit" to "300")).optJSONArray("entries").objects().mapNotNull { e ->
+                        val sid = e.int("series_id")
+                        if (seriesId != null && sid != seriesId) return@mapNotNull null
+                        val who = e.str("actor_name")
+                        val target = e.str("target_name")
+                        Row3(
+                            "Comptes", accountActionLabel(e.str("action")) + (target?.let { " · $it" } ?: ""),
+                            listOfNotNull(who, e.str("detail")).joinToString(" · ").ifBlank { null },
+                            e.str("created_at"), if (e.optBoolean("success", true)) null else false,
+                            sid, e.str("series_title"),
+                        )
+                    }
+                }
+            },
         ).awaitAll().flatten().sortedByDescending { it.date ?: "" }
     }
+}
+
+/** Libellé d'une action du journal des comptes (/api/auth/activity). */
+private fun accountActionLabel(action: String?): String = when (action) {
+    "login" -> "Connexion"
+    "login_failed" -> "Connexion refusée"
+    "logout" -> "Déconnexion"
+    "signup_request" -> "Demande de compte"
+    "account_approved" -> "Compte validé"
+    "account_rejected" -> "Compte refusé"
+    "account_created" -> "Compte créé"
+    "account_deleted" -> "Compte supprimé"
+    "account_edited" -> "Compte modifié"
+    "role_changed" -> "Rôle changé"
+    "access_changed" -> "Accès changés"
+    "profile_edited" -> "Profil modifié"
+    "password_change_failed" -> "Mot de passe refusé"
+    "avatar_changed" -> "Avatar changé"
+    "request_created" -> "Demande de BD"
+    "request_approved" -> "Demande validée"
+    "request_rejected" -> "Demande refusée"
+    "request_cancelled" -> "Demande annulée"
+    "settings_changed" -> "Réglage modifié"
+    null -> "Action"
+    else -> action.replace('_', ' ').replaceFirstChar { it.uppercase() }
 }
 
 /** Historique d'une série (imports, téléchargements, actions), ouvert depuis son menu. */
@@ -265,6 +339,25 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 .mapNotNull { f -> f.int("series_id")?.let { it to (f.str("series_title") ?: "(série)") } }.distinct()
         } catch (e: Exception) { emptyList() }
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Appui sur un import : sa série se lit dans le détail de l'opération ; une seule série s'ouvre
+    // directement, plusieurs ouvrent la fenêtre de la ligne pour choisir.
+    fun openImport(r: Row3) {
+        val op = r.operationId ?: return
+        scope.launch {
+            val found = try {
+                api.getObject("api/import/history/$op").optJSONObject("details")?.optJSONArray("files").objects()
+                    .mapNotNull { f -> f.int("series_id")?.let { it to (f.str("series_title") ?: "(série)") } }.distinct()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, e.readable(), android.widget.Toast.LENGTH_LONG).show(); return@launch
+            }
+            when (found.size) {
+                1 -> onOpenSeries(found[0].first, found[0].second)
+                0 -> android.widget.Toast.makeText(context, "Aucune série liée à cet import", android.widget.Toast.LENGTH_SHORT).show()
+                else -> detailRow = r
+            }
+        }
+    }
     val kinds = rows.orEmpty().groupingBy { it.kind }.eachCount().entries.sortedByDescending { it.value }
     val shown = rows.orEmpty().filter { kind == null || it.kind == kind }
     PullToRefreshBox(isRefreshing = loading && rows != null, onRefresh = { scope.launch { load() } }, modifier = Modifier.fillMaxSize()) {
@@ -286,7 +379,12 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
             errors.forEach { (k, v) -> item(key = "e-$k") { ErrorCard("$k : $v", Modifier.padding(16.dp)) } }
             if (rows != null && shown.isEmpty()) item { EmptyState("Rien dans l'historique") }
             items(shown) { r ->
-                SimpleRow(r, onOpenSeries, onLongClick = { detailRow = r })
+                SimpleRow(r, onOpenSeries, onLongClick = { detailRow = r },
+                    onClick = when {
+                        r.seriesId == null && r.operationId != null -> ({ openImport(r) })
+                        r.ai != null && r.seriesId == null -> ({ detailRow = r })
+                        else -> null
+                    })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
@@ -297,6 +395,12 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 Text(r.seriesTitle ?: r.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(listOfNotNull(r.date?.take(16), r.client).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 r.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                r.ai?.let { e ->
+                    Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                        AiEntryDetails(e, onOpenSeries = { id, title -> detailRow = null; onOpenSeries(id, title) })
+                    }
+                }
+                if (r.ai != null && r.seriesId == null) return@Column
                 val targets = r.seriesId?.let { listOf(it to (r.seriesTitle ?: r.title)) } ?: opSeries
                 targets.take(5).forEach { (id, title) ->
                     androidx.compose.material3.Button(

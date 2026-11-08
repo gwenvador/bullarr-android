@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -105,8 +106,6 @@ fun SearchScreen(vm: AppViewModel) {
     val uri = LocalUriHandler.current
     // Tous les résultats en une liste, ou groupés par source (repliables).
     var table by rememberSaveable { mutableStateOf(true) }
-    // Recherche Bédéthèque pour ajouter une série (même boîte que le « + » de la bibliothèque).
-    var addSeries by remember { mutableStateOf(false) }
     // Sources masquées (appui sur leur puce) : leurs résultats disparaissent, sans rien relancer.
     val hidden = remember { mutableStateMapOf<String, Boolean>() }
     var sortKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -138,7 +137,7 @@ fun SearchScreen(vm: AppViewModel) {
                 }
                 CompactSearchField(
                     value = s.title, onValueChange = { s.title = it },
-                    placeholder = "Rechercher un album…",
+                    placeholder = "Série ou album…",
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); if (s.title.isNotBlank()) s.search() }),
                     modifier = Modifier.weight(1f),
@@ -167,9 +166,6 @@ fun SearchScreen(vm: AppViewModel) {
                         }
                         if (sortKey != null) DropdownMenuItem(text = { Text("Ordre par défaut") }, onClick = { sortKey = null; sortMenu = false })
                     }
-                }
-                IconButton(onClick = { focus.clearFocus(); addSeries = true }) {
-                    Icon(Icons.Outlined.LibraryAdd, contentDescription = "Ajouter une série depuis Bédéthèque")
                 }
             }
             // Sources : appui pour afficher / masquer leurs résultats, appui long pour les activer / désactiver.
@@ -208,7 +204,6 @@ fun SearchScreen(vm: AppViewModel) {
                 )
             }
         }
-        if (addSeries) SeriesAddDialog(vm, onDismiss = { addSeries = false }, initialQuery = s.title, onAdded = { _, _ -> })
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
 
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
@@ -285,18 +280,20 @@ private fun SourceChip(
     val active = enabled && shown
     Row(
         Modifier.height(32.dp).clip(RoundedCornerShape(8.dp))
-            .background(if (active) cs.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-            .border(1.dp, if (active) androidx.compose.ui.graphics.Color.Transparent else cs.outlineVariant, RoundedCornerShape(8.dp))
+            // Active : fond relevé, bordure contrastée et coche ; inactive : transparente et très estompée.
+            .background(if (active) cs.surfaceContainerHighest else androidx.compose.ui.graphics.Color.Transparent)
+            .border(if (active) 1.5.dp else 1.dp, if (active) cs.onSurfaceVariant else cs.outlineVariant, RoundedCornerShape(8.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .alpha(if (active) 1f else 0.5f)
+            .alpha(if (active) 1f else 0.4f)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (active) Icon(Icons.Outlined.Check, contentDescription = "Affichée", tint = cs.onSurface, modifier = Modifier.size(14.dp))
         Logo(key, label, 18.dp, tip = false)
         when {
             loading -> CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
             failed -> Text("!", style = MaterialTheme.typography.labelLarge, color = cs.error)
-            count != null -> Text("$count", style = MaterialTheme.typography.labelLarge, color = if (active) cs.onSecondaryContainer else cs.onSurfaceVariant)
+            count != null -> Text("$count", style = MaterialTheme.typography.labelLarge, color = if (active) cs.onSurface else cs.onSurfaceVariant)
             else -> Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }

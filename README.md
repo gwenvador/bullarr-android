@@ -3,6 +3,7 @@
 Application Android (Kotlin, Jetpack Compose) qui pilote Bullarr à travers son API.
 L'icône reprend le logo de Bullarr (`static/img/bullarr-icon.png`).
 Interface en français, thème clair ou sombre : suit le téléphone, ou forcé dans Configuration → Apparence (Système, Clair, Sombre).
+Cinq palettes de couleurs, les mêmes que sur le site : Atelier, Ardoise, Sauge, Océan et Prune (Configuration → Apparence, avec un aperçu).
 
 <p align="center">
   <a href="https://gwenvador.github.io/bullarr-android/repo/"><img src="https://gwenvador.github.io/bullarr/fdroid.svg" alt="Installer Bullarr avec F-Droid" height="64"></a>
@@ -85,7 +86,9 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
 
 - **Bibliothèque** : séries avec drapeau d'origine (BD, Comics, Manga), recherche, **filtres**
   (genre, type, année, dernière mise à jour, votes, nombre de volumes, taille) et **tri**
-  (alphabétique, popularité, date, taille), en liste ou en grille de couvertures. Toucher un tome ouvre sa fiche (résumé, auteurs,
+  (alphabétique, popularité, date, taille), en liste ou en grille de couvertures (un petit curseur règle la taille
+  des miniatures). Un menu déroulant change de bibliothèque. La liste des séries et les couvertures sont gardées
+  sur le téléphone : la bibliothèque s'affiche tout de suite au lancement, puis se met à jour en arrière-plan. Toucher un tome ouvre sa fiche (résumé, auteurs,
   éditeur, note, fichier) ; la loupe à droite le cherche pour le télécharger. L'onglet
   **Hors ligne** liste les albums copiés sur le téléphone (voir plus bas). Un **appui long** sur
   une série la sélectionne (plusieurs possibles) : télécharger hors ligne, mettre à jour les
@@ -101,13 +104,15 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
   Historique (imports, téléchargements, actions, filtre par type). Des pastilles comptent les éléments en attente.
 - **Actions** : Enrichir (Indispensables BD, Panthéon, Thèmes, Top 100 BDGest, Par auteur), Surveillance (activer ou couper la
   surveillance d'une série), Vérification (rapports en lecture seule).
-- **Configuration** : Connexion (URL et clé API de l'app), puis les réglages de Bullarr
+- **Configuration** : Profil en premier (nom, avatar, mot de passe, déconnexion), Connexion (URL et clé API de l'app), puis les réglages de Bullarr
   eux-mêmes — Indexeurs (Prowlarr, Fourtoutici, Anna's Archive, VK), Clients (aMule,
   qBittorrent, rTorrent, Deluge, Shelfmark, Komga), Notifications (bot Telegram), Imports,
   Recherche (ordre des sources, extensions, création de séries, recherche automatique),
   Surveillance. Chaque carte a un bouton Enregistrer et, quand l'API le permet, Tester.
   Indexeurs inclut le compte EBDZ et son scraping automatique, Imports le format de
-  renommage, Accès la connexion à Bullarr (mot de passe, SSO), Apparence le thème de l'app. Le dernier onglet, Web,
+  renommage, Accès la connexion à Bullarr (mot de passe, SSO), Apparence le thème et la palette de l'app.
+  Un compte **lecteur** ne voit que Profil, Intégrations, Apparence et À propos : Intégrations relie son
+  propre compte Komga. Le dernier onglet, Web,
   ouvre dans le navigateur ce qui n'est pas dans l'app : forums EBDZ, canaux Telegram,
   clé API, sauvegarde.
 
@@ -122,8 +127,10 @@ Un tome possédé se lit dans l'app (bouton ▶) : pages en plein écran, zoom a
 largeur de page ajustable, mode webtoon (défilement vertical, zoomable), miniatures des pages,
 sens manga (droite → gauche, par série, d'office pour l'origine Asie), deux pages côte à côte
 en paysage, reprise à la dernière page et bouton « Tome suivant » à la fin de l'album. La page
-lue est envoyée à Bullarr (`POST /api/volumes/<id>/reader/progress`), qui la relaie à Komga
-s'il est relié. Les albums commencés apparaissent en tête de la bibliothèque (« Continuer la
+lue est envoyée à Bullarr (`POST /api/volumes/<id>/reader/progress`). L'avancement est propre à
+chaque compte : si l'utilisateur a relié son compte Komga (Configuration → Intégrations, ou Profil
+sur le site), Bullarr l'y enregistre et affiche ce qui a été lu dans Komga ; sinon il est
+enregistré par Bullarr, pour ce compte uniquement. Les albums commencés apparaissent en tête de la bibliothèque (« Continuer la
 lecture »). Les pages viennent du lecteur de
 Bullarr (`GET /api/volumes/<id>/reader`, `…/reader/page/<n>`), qui sert des images quel que soit
 le format du fichier (CBZ, CBR, PDF).

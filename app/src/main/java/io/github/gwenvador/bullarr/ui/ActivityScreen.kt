@@ -248,8 +248,8 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                if (selected.isEmpty()) Text("Activité", style = MaterialTheme.typography.headlineSmall)
-                else Row(verticalAlignment = Alignment.CenterVertically) {
+                // Le nom de l'onglet est déjà affiché au-dessus : pas de second titre « Activité ».
+                if (selected.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { selected = emptyList() }) { Icon(Icons.Outlined.Close, contentDescription = "Annuler la sélection") }
                     Text("${selected.size}", style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f))
                     IconButton(onClick = { selected = deleters.keys.toList() }) { Icon(Icons.Outlined.SelectAll, contentDescription = "Tout sélectionner") }

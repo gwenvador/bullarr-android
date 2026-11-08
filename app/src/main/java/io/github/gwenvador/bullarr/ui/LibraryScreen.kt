@@ -9,11 +9,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SelectAll
@@ -52,6 +61,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.ArrowDownward
@@ -75,18 +86,22 @@ import io.github.gwenvador.bullarr.data.normalize
 fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
     LaunchedEffect(vm.api) { vm.loadLibrary() }
     val q = vm.query
+    var addQuery by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     val filters = vm.filters
     // remember : sans lui, l'état était recréé à chaque recomposition et la feuille ne s'ouvrait jamais.
     var sheet by remember { androidx.compose.runtime.mutableStateOf(false) }
-    val filtered = remember(vm.series, q, filters, vm.sort, vm.sortDesc) {
+    val inName = vm.searchInName
+    val inTags = vm.searchInTags
+    val filtered = remember(vm.series, q, filters, vm.sort, vm.sortDesc, inName, inTags) {
         val terms = normalize(q).split(' ').filter { it.isNotBlank() }
-        vm.sort.sorted(vm.series.filter { s -> (terms.isEmpty() || terms.all { it in s.searchKey }) && filters.matches(s) }, vm.sortDesc)
+        // Chaque mot doit se trouver dans le nom ou dans les tags, selon les cases cochées.
+        fun hit(s: SeriesSummary, t: String) = (inName && t in s.nameKey) || (inTags && t in s.tagsKey)
+        vm.sort.sorted(vm.series.filter { s -> (terms.isEmpty() || terms.all { hit(s, it) }) && filters.matches(s) }, vm.sortDesc)
     }
     androidx.compose.runtime.SideEffect { vm.visibleSeries = filtered }
     var sortMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
     // Sélection multiple (appui long sur une série) : MAJ Bédéthèque, scan, suppression.
     var selected by rememberSaveable { androidx.compose.runtime.mutableStateOf(emptyList<Int>()) }
-    var addSeries by remember { androidx.compose.runtime.mutableStateOf(false) }
     var confirmDelete by remember { androidx.compose.runtime.mutableStateOf(false) }
     var confirmDownload by remember { androidx.compose.runtime.mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -110,21 +125,57 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
         launchAction(scope, context, "$ok (${ids.size})", then = { if (reload) vm.loadLibrary(force = true) }) { ids.forEach { one(api, it) } }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // En-tête masqué quand on fait défiler vers le bas, réaffiché dès qu'on remonte (seuil pour éviter
+    // les sauts sur de petits mouvements) ; toujours visible pendant une sélection.
+    var headerShown by remember { androidx.compose.runtime.mutableStateOf(true) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val headerScroll = remember(density) {
+        val threshold = with(density) { 24.dp.toPx() }
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            var acc = 0f
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                val dy = consumed.y
+                if (dy == 0f) { if (available.y > 0f) headerShown = true; return androidx.compose.ui.geometry.Offset.Zero }
+                if ((acc < 0f) != (dy < 0f)) acc = 0f
+                acc += dy
+                if (acc < -threshold) { headerShown = false; acc = 0f }
+                else if (acc > threshold) { headerShown = true; acc = 0f }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
+        // En-tête serré : barre d'outils, portée de recherche et infos sans marges perdues.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = headerShown || selected.isNotEmpty(),
+            enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
+        ) {
+        Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             if (selected.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { selected = emptyList() }) { Icon(Icons.Outlined.Clear, contentDescription = "Annuler la sélection") }
                 Text("${selected.size}", style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.weight(1f))
                 IconButton(onClick = { selected = filtered.map { it.id } }) { Icon(Icons.Outlined.SelectAll, contentDescription = "Tout sélectionner") }
                 IconButton(onClick = { confirmDownload = true }) { Icon(Icons.Outlined.DownloadForOffline, contentDescription = "Télécharger hors ligne") }
+                // Métadonnées, scan et suppression : réservés aux administrateurs.
+                if (!vm.isReader) {
                 IconButton(onClick = { batch("Mise à jour lancée", false) { a, id -> ItemActions.updateSeriesMetadata(a, id) } }) { Icon(Icons.Outlined.Sync, contentDescription = "Mettre à jour les métadonnées (Bédéthèque)") }
                 IconButton(onClick = { batch("Scan lancé", true) { a, id -> ItemActions.scanSeries(a, id) } }) { Icon(Icons.Outlined.Refresh, contentDescription = "Scanner les fichiers") }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error) }
+                }
             } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = { addSeries = true }) { Icon(Icons.Outlined.Add, contentDescription = "Ajouter une série") }
+                // Pas de « + » ici : l'ajout de série se fait depuis Recherche.
                 CompactSearchField(
                     value = q, onValueChange = { vm.query = it },
-                    placeholder = "Rechercher une série, un auteur…",
+                    placeholder = when {
+                        inName && inTags -> "Série, auteur, tag…"
+                        inTags -> "Tag…"
+                        else -> "Série, auteur…"
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 Box {
@@ -159,6 +210,10 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                         Icon(Icons.Outlined.FilterList, contentDescription = "Filtres")
                     }
                 }
+                // Albums hors ligne (remplace l'ancien onglet « Hors ligne »).
+                IconButton(onClick = { vm.subTab[Section.Library] = 1 }) {
+                    Icon(Icons.Outlined.OfflinePin, contentDescription = "Albums hors ligne")
+                }
                 // Liste ↔ grille de couvertures.
                 IconButton(onClick = { vm.chooseLibraryGrid(!vm.libraryGrid) }) {
                     Icon(
@@ -167,19 +222,26 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     )
                 }
             }
-            if (vm.libraries.size > 1) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(vm.libraries, key = { it.id }) { lib ->
-                        FilterChip(selected = lib.id == vm.selectedLibrary?.id, onClick = { vm.selectLibrary(lib) }, label = { Text(lib.name) })
-                    }
-                }
+            // Portée de la recherche (affichée dès qu'on tape) : nom de la série et/ou tags ; au moins une reste cochée.
+            if (selected.isEmpty() && (q.isNotBlank() || !inName || !inTags)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Chercher dans", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilterChip(selected = inName, onClick = { if (!inName || inTags) vm.searchInName = !inName }, label = { Text("Nom de la série") })
+                FilterChip(selected = inTags, onClick = { if (!inTags || inName) vm.searchInTags = !inTags }, label = { Text("Tags") })
+            }
+            // Bibliothèque : nom + menu déroulant (tient avec n'importe quel nombre de bibliothèques) ; nombre de séries et
+            // taille des miniatures sur la même ligne, à droite.
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                LibraryPicker(vm, Modifier.weight(1f))
+                if (vm.libraryGrid) SizeSlider(vm.libraryCellSize, { vm.chooseLibraryCellSize(it) }, 80f..200f, Modifier.padding(end = 4.dp))
             }
             vm.selectedLibrary?.let { lib ->
                 Text(
-                    "${lib.name} · ${filtered.size} série(s)" + (lib.volumesCount?.let { " · $it tomes" } ?: ""),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "${filtered.size} série(s)" + (lib.volumesCount?.let { " · $it tomes" } ?: ""),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, bottom = 2.dp), maxLines = 1,
                 )
             }
+        }
         }
         menuFor?.let { sm ->
             // Relit la série à jour : le menu reflète l'état courant après chaque action.
@@ -209,7 +271,6 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 confirmButton = { androidx.compose.material3.TextButton(onClick = { menuFor = null }) { Text("Fermer") } },
             )
         }
-        if (addSeries) SeriesAddDialog(vm, onDismiss = { addSeries = false }, onAdded = { _, _ -> })
         if (confirmDownload) ConfirmDialog(
             "Télécharger ${selected.size} série(s) hors ligne ?",
             "Tous les tomes possédés des séries sélectionnées seront téléchargés sur le téléphone. Cela peut être volumineux.",
@@ -251,9 +312,13 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
             syncing = false
         }
         fun syncKeepReading() { syncFirst = true; keepTick++ }
+        // Le rond n'apparaît que si l'utilisateur a tiré la liste : le rafraîchissement silencieux
+        // (après l'affichage du cache) ne doit pas masquer les couvertures.
+        var pulled by remember { androidx.compose.runtime.mutableStateOf(false) }
+        LaunchedEffect(vm.libraryLoading) { if (!vm.libraryLoading) pulled = false }
         PullToRefreshBox(
-            isRefreshing = vm.libraryLoading && vm.series.isNotEmpty(),
-            onRefresh = { vm.loadLibrary(force = true); syncKeepReading() },
+            isRefreshing = pulled && vm.libraryLoading,
+            onRefresh = { pulled = true; vm.loadLibrary(force = true); syncKeepReading() },
             modifier = Modifier.fillMaxSize(),
         ) {
             // Albums commencés : en tête, tant qu'aucune recherche, filtre ni sélection n'est en cours.
@@ -280,13 +345,23 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     }
                 }
             }
+            // Recherche en cours : proposer d'ajouter la BD (fiche Bédéthèque) après les séries trouvées.
+            val addRow: @Composable () -> Unit = {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { addQuery = q.trim() }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(Icons.Outlined.LibraryAdd, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                    Text((if (vm.isReader) "Demander « " else "Ajouter « ") + "${q.trim()} »", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             fun offlineOf(s: SeriesSummary) = (offlineBySeries.first[s.id] ?: 0) + (offlineBySeries.second[s.title] ?: 0)
             fun longClick(s: SeriesSummary) { if (selected.isNotEmpty()) toggle(s.id) else menuFor = s }
             fun click(s: SeriesSummary) { if (selected.isNotEmpty()) toggle(s.id) else onOpen(s) }
             if (vm.libraryGrid) {
                 androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                    androidx.compose.foundation.lazy.grid.GridCells.Adaptive(108.dp), Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
+                    androidx.compose.foundation.lazy.grid.GridCells.Adaptive(vm.libraryCellSize.dp), Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     item(key = "header", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { header() }
@@ -294,14 +369,17 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                         val s = filtered[i]
                         SeriesCell(s, vm.coverUrl(s.coverPath), selected = s.id in selected, offline = offlineOf(s), onLongClick = { longClick(s) }) { click(s) }
                     }
+                    if (q.isNotBlank()) item(key = "add", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { addRow() }
                 }
-            } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+            } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 0.dp, bottom = 8.dp)) {
                 item(key = "header") { header() }
                 items(filtered, key = { it.id }) { s ->
                     SeriesRow(s, vm.coverUrl(s.coverPath), selected = s.id in selected, offline = offlineOf(s), onLongClick = { longClick(s) }) { click(s) }
                     HorizontalDivider(Modifier.padding(start = 84.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 }
+                if (q.isNotBlank()) item(key = "add") { addRow() }
             }
+            addQuery?.let { aq -> SeriesAddDialog(vm, onDismiss = { addQuery = null }, initialQuery = aq, onAdded = { sid, title -> addQuery = null; vm.openSeriesById(sid, title) }) }
         }
     }
 }
@@ -313,9 +391,9 @@ private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.b
     // Replié par défaut ; l'état est mémorisé sur l'appareil (changer de page ou relancer l'app le garde).
     val prefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("library_ui", android.content.Context.MODE_PRIVATE)
     var expanded by remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean("keep_reading_open", false)) }
-    Column(Modifier.padding(top = 4.dp)) {
+    Column {
         Row(
-            Modifier.fillMaxWidth().clickable { expanded = !expanded; prefs.edit().putBoolean("keep_reading_open", expanded).apply() }.padding(horizontal = 16.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().clickable { expanded = !expanded; prefs.edit().putBoolean("keep_reading_open", expanded).apply() }.padding(start = 16.dp, end = 12.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Continuer la lecture", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -349,42 +427,97 @@ private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.b
                 }
             }
         }
-        HorizontalDivider(Modifier.padding(top = 8.dp), color = cs.outlineVariant)
+        HorizontalDivider(Modifier.padding(top = if (expanded) 8.dp else 0.dp, bottom = 4.dp), color = cs.outlineVariant)
     }
 }
 
-/** Case de la grille : couverture, pastilles (favori, à lire, hors ligne) et titre. */
+/** Case de la grille : couverture arrondie, pastilles (favori, à lire, hors ligne) et titre. */
 @Composable
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun SeriesCell(s: SeriesSummary, cover: String?, selected: Boolean, offline: Int, onLongClick: () -> Unit, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(
-        Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-            .background(if (selected) cs.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        Modifier.clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
-            Cover(cover, maxWidth)
-            Row(
-                Modifier.align(Alignment.TopEnd).padding(4.dp)
-                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                    .padding(horizontal = 3.dp, vertical = 2.dp),
+            Cover(
+                cover, maxWidth,
+                Modifier.shadow(3.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp))
+                    .then(if (selected) Modifier.border(3.dp, cs.primary, RoundedCornerShape(8.dp)) else Modifier),
+            )
+            if (s.isFavorite || s.toReadLater || offline > 0) Row(
+                Modifier.align(Alignment.TopEnd).padding(5.dp)
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 val white = androidx.compose.ui.graphics.Color.White
-                if (s.isFavorite) Icon(Icons.Filled.Star, contentDescription = "Favori", tint = white, modifier = Modifier.size(14.dp))
-                if (s.toReadLater) Icon(Icons.Filled.Bookmark, contentDescription = "À lire plus tard", tint = white, modifier = Modifier.size(14.dp))
-                if (offline > 0) Icon(Icons.Outlined.OfflinePin, contentDescription = "$offline album(s) hors ligne", tint = white, modifier = Modifier.size(14.dp))
+                if (s.isFavorite) Icon(Icons.Filled.Star, contentDescription = "Favori", tint = white, modifier = Modifier.size(13.dp))
+                if (s.toReadLater) Icon(Icons.Filled.Bookmark, contentDescription = "À lire plus tard", tint = white, modifier = Modifier.size(13.dp))
+                if (offline > 0) Icon(Icons.Outlined.OfflinePin, contentDescription = "$offline album(s) hors ligne", tint = white, modifier = Modifier.size(13.dp))
             }
             if (selected) Icon(
-                Icons.Outlined.CheckCircle, contentDescription = "Sélectionnée", tint = cs.primary,
-                modifier = Modifier.align(Alignment.Center).size(36.dp).background(cs.surface, androidx.compose.foundation.shape.CircleShape),
+                Icons.Filled.CheckCircle, contentDescription = "Sélectionnée", tint = cs.primary,
+                modifier = Modifier.align(Alignment.TopStart).padding(5.dp).size(24.dp).background(cs.surface, androidx.compose.foundation.shape.CircleShape),
             )
         }
-        Text(s.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(s.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 2.dp))
         val count = if (s.isOneshot) "One-shot" else s.totalKnown?.let { "${s.ownedTomes}/$it tomes" } ?: "${s.ownedTomes} tome(s)"
         Text(count, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 4.dp))
+    }
+}
+
+/** Nom de la bibliothèque courante ; s'il y en a plusieurs, un appui ouvre la liste pour en changer. */
+@Composable
+private fun LibraryPicker(vm: AppViewModel, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val many = vm.libraries.size > 1
+    var open by remember { androidx.compose.runtime.mutableStateOf(false) }
+    Box(modifier) {
+        Row(
+            Modifier.clip(RoundedCornerShape(8.dp)).then(if (many) Modifier.clickable { open = true } else Modifier)
+                .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(vm.selectedLibrary?.name.orEmpty(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            if (many) Icon(Icons.Filled.ArrowDropDown, contentDescription = "Changer de bibliothèque", tint = cs.onSurfaceVariant)
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            vm.libraries.forEach { lib ->
+                val cur = lib.id == vm.selectedLibrary?.id
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(lib.name, fontWeight = if (cur) FontWeight.SemiBold else FontWeight.Normal) },
+                    trailingIcon = { if (cur) Icon(Icons.Filled.Check, contentDescription = "Bibliothèque affichée", tint = cs.primary) },
+                    onClick = { open = false; if (!cur) vm.selectLibrary(lib) },
+                )
+            }
+        }
+    }
+}
+
+/** Petit curseur discret (piste fine, pastille de 12 dp) pour la taille des miniatures. */
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun SizeSlider(value: Float, onChange: (Float) -> Unit, range: ClosedFloatingPointRange<Float>, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.GridView, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(14.dp))
+        androidx.compose.material3.Slider(
+            value = value, onValueChange = onChange, valueRange = range,
+            modifier = Modifier.width(88.dp).height(24.dp).padding(horizontal = 6.dp),
+            thumb = { Box(Modifier.size(12.dp).background(cs.primary, androidx.compose.foundation.shape.CircleShape)) },
+            track = { st ->
+                val f = ((st.value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+                Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(cs.outlineVariant)) {
+                    Box(Modifier.fillMaxWidth(f).height(3.dp).background(cs.primary))
+                }
+            },
+        )
+        Icon(Icons.Outlined.Image, contentDescription = "Taille des miniatures", tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }
 

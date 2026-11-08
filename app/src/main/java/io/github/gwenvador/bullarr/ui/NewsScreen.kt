@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import io.github.gwenvador.bullarr.data.str
+import io.github.gwenvador.bullarr.data.bool
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -102,6 +104,8 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     val errors = remember { mutableStateMapOf<NewsType, String>() }
     var rssNote by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var rssRefreshing by remember { mutableStateOf(false) }
+    var rssPass by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     // Entrée dont on choisit ou change la série (menu ⋮).
@@ -109,18 +113,39 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     // Entrée dont on crée la série (dialogue d'ajout), puis rattachée à la nouvelle série.
     var addingFor by remember { mutableStateOf<NewsItem?>(null) }
 
-    suspend fun load(type: NewsType, refresh: Boolean) {
+    // Mêmes réglages que la page web : premier lot des 100 entrées les plus récentes par source,
+    // « Charger plus » récupère toute la fenêtre de 60 jours, puis « Charger une période plus
+    // ancienne » ajoute 60 jours de plus (EBDZ et Telegram ; le RSS n'a pas d'historique).
+    var daysWindow by rememberSaveable { mutableIntStateOf(NEWS_DAYS) }
+    var fullWindow by remember { mutableStateOf(false) }
+    var hasMoreEbdz by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
+
+    suspend fun load(type: NewsType, refresh: Boolean, limit: Int? = NEWS_INITIAL_LIMIT, olderThanDays: Int? = null) {
         errors.remove(type)
+        val window = buildMap {
+            put("days", daysWindow.toString())
+            limit?.let { put("limit", it.toString()) }
+            olderThanDays?.let { put("older_than_days", it.toString()) }
+        }
         try {
-            feeds[type] = when (type) {
+            val loaded = when (type) {
                 NewsType.RSS -> {
-                    val (items, errs) = parseRss(api.getObject("api/ebdz/rss/latest", if (refresh) mapOf("refresh" to "1") else emptyMap()))
+                    if (olderThanDays != null) return
+                    val o = api.getObject("api/ebdz/rss/latest", if (refresh) mapOf("limit" to "${limit ?: NEWS_INITIAL_LIMIT}", "refresh" to "1") else mapOf("limit" to "${limit ?: NEWS_INITIAL_LIMIT}"))
+                    val (items, errs) = parseRss(o)
                     rssNote = errs.takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "Flux RSS en erreur :\n")
+                    rssRefreshing = o.bool("refreshing") == true
                     items
                 }
-                NewsType.TELEGRAM -> parseTelegram(api.getObject("api/telegram-channels/latest", mapOf("days" to "15")))
-                NewsType.EBDZ -> parseEbdz(api.getObject("api/ebdz/latest"))
+                NewsType.TELEGRAM -> parseTelegram(api.getObject("api/telegram-channels/latest", window))
+                NewsType.EBDZ -> api.getObject("api/ebdz/latest", window).let { o ->
+                    hasMoreEbdz = o.bool("has_more") == true
+                    parseEbdz(o)
+                }
             }
+            feeds[type] = if (olderThanDays == null) loaded
+            else (feeds[type].orEmpty() + loaded).distinctBy { listOf(it.type, it.title, it.subtitle, it.date) }
         } catch (e: Exception) {
             errors[type] = e.readable()
         }
@@ -128,8 +153,45 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
 
     suspend fun loadAll(refresh: Boolean) {
         loading = true
+        if (refresh) {
+            // Bouton Actualiser du site : relance aussi le scrape EBDZ et Telegram.
+            kotlinx.coroutines.coroutineScope {
+                listOf(
+                    async { runCatching { api.postObject("api/ebdz/scrape", org.json.JSONObject()) } },
+                    async { runCatching { api.postObject("api/telegram-channels/scrape", org.json.JSONObject()) } },
+                ).awaitAll()
+            }
+            daysWindow = NEWS_DAYS
+        }
+        fullWindow = false
         kotlinx.coroutines.coroutineScope { NewsType.entries.map { t -> async { load(t, refresh) } }.awaitAll() }
         loading = false
+        // Seule une actualisation demandée relit les flux ; le serveur calcule ensuite les séries.
+        if (refresh) rssPass++
+    }
+
+    suspend fun loadMore() {
+        loadingMore = true
+        if (!fullWindow) {
+            kotlinx.coroutines.coroutineScope { listOf(NewsType.EBDZ, NewsType.TELEGRAM).map { t -> async { load(t, false, limit = null) } }.awaitAll() }
+            fullWindow = true
+        } else {
+            val older = daysWindow
+            daysWindow += NEWS_DAYS
+            kotlinx.coroutines.coroutineScope { listOf(NewsType.EBDZ, NewsType.TELEGRAM).map { t -> async { load(t, false, limit = null, olderThanDays = older) } }.awaitAll() }
+        }
+        loadingMore = false
+    }
+    // L'ouverture affiche ce que le serveur a en base (actualisé toutes les 15 min, séries déjà
+    // calculées) sans rien redemander. Après « Actualiser » seulement, le serveur calcule les séries
+    // des nouvelles releases : on relit alors le flux après 4, 8 puis 12 s pour les afficher.
+    LaunchedEffect(rssPass) {
+        if (rssPass == 0) return@LaunchedEffect
+        var attempt = 1
+        while (rssRefreshing && attempt <= 3) {
+            kotlinx.coroutines.delay(4000L * attempt++)
+            load(NewsType.RSS, refresh = false)
+        }
     }
     LaunchedEffect(api) { if (feeds.isEmpty()) loadAll(refresh = false) }
     pickFor?.let { entry ->
@@ -244,6 +306,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 )
                 else Spacer(Modifier.weight(1f))
             }
+            // Actualiser : relit les flux RSS et relance les scrapes EBDZ / Telegram (comme le bouton du site).
+            IconButton(onClick = { if (!loading) scope.launch { loadAll(refresh = true) } }) {
+                if (loading && feeds.isNotEmpty()) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Outlined.Refresh, contentDescription = "Actualiser les nouveautés", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
                 Icon(
                     Icons.Outlined.Search, contentDescription = "Rechercher dans les nouveautés",
@@ -268,6 +335,15 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 itemsIndexed(items, key = { i, it -> "${it.type}-$i-${it.title.hashCode()}" }) { _, item ->
                     NewsRow(vm, item, showType = tab == 0, genre = item.bedethequeUrl?.let { genres[it] }, onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it })
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+                val moreAvailable = !fullWindow || (hasMoreEbdz && shownTypes != listOf(NewsType.RSS))
+                if (feeds.isNotEmpty() && !loading && moreAvailable && shownTypes != listOf(NewsType.RSS)) item(key = "load-more") {
+                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        if (loadingMore) androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp))
+                        else androidx.compose.material3.OutlinedButton(onClick = { scope.launch { loadMore() } }) {
+                            Text(if (!fullWindow) "Charger plus" else "Charger une période plus ancienne")
+                        }
+                    }
                 }
             }
         }
@@ -442,3 +518,9 @@ private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: 
         }
     }
 }
+
+/** Fenêtre des nouveautés EBDZ et Telegram, en jours, et pas de « période plus ancienne » : comme le site (nouveautesDaysWindow, NOUVEAUTES_WINDOW_STEP). */
+private const val NEWS_DAYS = 60
+
+/** Premier lot affiché par source, comme le site (NOUVEAUTES_INITIAL_LIMIT). */
+private const val NEWS_INITIAL_LIMIT = 100

@@ -45,7 +45,7 @@ import org.json.JSONObject
  * POST /api/bedetheque/add-series (url Bédéthèque + bibliothèque). [onAdded] reçoit l'id de la série créée.
  */
 @Composable
-fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: String = "", onAdded: (Int, String) -> Unit) {
+fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: String = "", onRequested: () -> Unit = {}, onAdded: (Int, String) -> Unit) {
     val api = vm.api ?: return
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -54,6 +54,10 @@ fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: Strin
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val library = vm.selectedLibrary ?: vm.libraries.firstOrNull()
+    // Un lecteur ne peut pas ajouter : il demande la série (POST /api/requests), validée par un administrateur.
+    val asRequest = vm.isReader
+    // État de chaque résultat pour ce compte (POST /api/requests/lookup) : déjà dans la bibliothèque, déjà demandé…
+    var states by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
 
     fun search() {
         if (query.isBlank() || busy) return
@@ -62,11 +66,38 @@ fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: Strin
             try { results = api.getObject("api/bedetheque/search", mapOf("q" to query.trim())).optJSONArray("results").objects() }
             catch (e: Exception) { error = e.readable() }
             busy = false
+            val urls = results.orEmpty().mapNotNull { it.str("url") }
+            if (urls.isNotEmpty()) runCatching {
+                val items = api.postObject("api/requests/lookup", JSONObject().put("urls", org.json.JSONArray(urls))).optJSONObject("items")
+                states = items?.let { o -> o.keys().asSequence().mapNotNull { k -> o.optJSONObject(k)?.let { k to it } }.toMap() }.orEmpty()
+            }
         }
     }
     // Nom prérempli : la recherche part toute seule.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (initialQuery.isNotBlank()) search() }
+    fun request(r: JSONObject) {
+        val url = r.str("url") ?: return
+        val title = r.str("title") ?: ""
+        val app = context.applicationContext
+        onDismiss()
+        vm.viewModelScope.launch {
+            try {
+                val res = api.postObject("api/requests", JSONObject().put("url", url).put("title", title))
+                val msg = when (res.str("status")) {
+                    "adding" -> "Demande validée : ajout de « $title » en cours"
+                    "already" -> "« $title » est déjà dans la bibliothèque"
+                    "added" -> "« $title » ajoutée"
+                    else -> if (res.optBoolean("duplicate")) "« $title » est déjà demandée" else "Demande envoyée : « $title »"
+                }
+                android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_SHORT).show()
+                onRequested()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(app, "Demande impossible : ${e.readable()}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     fun add(r: JSONObject) {
+        if (asRequest) { request(r); return }
         val url = r.str("url") ?: return
         val lib = library ?: run { error = "Aucune bibliothèque : créez-en une dans l'interface web."; return }
         // Fermeture immédiate : l'ajout continue en arrière-plan (portée du ViewModel), résultat en toast.
@@ -89,7 +120,7 @@ fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: Strin
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Ajouter une série") },
+        title = { Text(if (asRequest) "Demander une BD" else "Ajouter une série") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -99,15 +130,29 @@ fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: Strin
                     keyboardActions = KeyboardActions(onSearch = { search() }),
                     trailingIcon = { IconButton(onClick = { search() }) { Icon(Icons.Outlined.Search, contentDescription = "Chercher") } },
                 )
-                library?.let { Text("Bibliothèque : ${it.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (asRequest) Text("Un administrateur valide la demande avant l'ajout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else library?.let { Text("Bibliothèque : ${it.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 error?.let { ErrorCard(it) }
                 if (results?.isEmpty() == true) Text("Aucun résultat sur Bédéthèque.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyColumn(Modifier.heightIn(max = 320.dp)) {
                     items(results.orEmpty()) { r ->
-                        Column(Modifier.fillMaxWidth().clickable(enabled = !busy) { add(r) }.padding(vertical = 8.dp)) {
+                        val st = r.str("url")?.let { states[it] }
+                        val inLibrary = st?.str("state") == "library"
+                        Column(Modifier.fillMaxWidth().clickable(enabled = !busy) {
+                            // Déjà dans la bibliothèque : ouvrir la fiche plutôt que l'ajouter / la demander.
+                            val sid = st?.int("series_id")
+                            if (inLibrary && sid != null) { onDismiss(); vm.openSeriesById(sid, r.str("title") ?: "") } else add(r)
+                        }.padding(vertical = 8.dp)) {
                             Text(r.str("title") ?: "(sans titre)", style = MaterialTheme.typography.bodyLarge)
                             r.str("genre")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            val badge = when (st?.str("state")) {
+                                "library" -> "Dans la bibliothèque" + (st.int("total")?.let { tot -> " · ${st.int("owned") ?: 0}/$tot tomes" } ?: "")
+                                "pending" -> "Déjà demandée"
+                                "rejected" -> "Demande refusée"
+                                else -> null
+                            }
+                            badge?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = if (st?.str("state") == "rejected") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }

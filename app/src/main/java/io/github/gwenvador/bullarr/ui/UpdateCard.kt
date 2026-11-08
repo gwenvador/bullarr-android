@@ -1,5 +1,21 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.NewReleases
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,7 +48,7 @@ fun UpdateCard(vm: AppViewModel) {
     LaunchedEffect(Unit) { if (vm.update == UpdateState.Idle) vm.checkUpdate() }
     val state = vm.update
 
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Application", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("Version installée : ${vm.installedVersion}", style = MaterialTheme.typography.bodyLarge)
@@ -58,6 +74,46 @@ fun UpdateCard(vm: AppViewModel) {
             }
             if (state !is UpdateState.Checking && state != UpdateState.Idle) {
                 OutlinedButton(onClick = { vm.checkUpdate() }) { Text("Vérifier maintenant") }
+            }
+        }
+    }
+}
+
+/** Réglages → À propos : version, mise à jour et liens vers les dépôts GitHub. */
+@Composable
+fun AboutScreen(vm: AppViewModel) {
+    val cs = MaterialTheme.colorScheme
+    val uri = LocalUriHandler.current
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Image(painterResource(io.github.gwenvador.bullarr.R.drawable.bullarr_logo), contentDescription = null, modifier = Modifier.size(56.dp))
+            Column {
+                Text("Bullarr", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = cs.primary)
+                Text("Version ${vm.installedVersion}", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            }
+        }
+        UpdateCard(vm)
+        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors()) {
+            Column(Modifier.padding(vertical = 8.dp)) {
+                Text("Liens", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                listOf(
+                    Triple(Icons.Outlined.PhoneAndroid, "Application Android", "https://github.com/gwenvador/bullarr-android"),
+                    Triple(Icons.Outlined.Dns, "Serveur Bullarr", "https://github.com/gwenvador/bullarr"),
+                    Triple(Icons.Outlined.NewReleases, "Versions de l'application", "https://github.com/gwenvador/bullarr-android/releases"),
+                    Triple(Icons.Outlined.BugReport, "Signaler un problème", "https://github.com/gwenvador/bullarr-android/issues"),
+                ).forEach { (icon, label, url) ->
+                    ListItem(
+                        headlineContent = { Text(label) },
+                        supportingContent = { Text(url.removePrefix("https://"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingContent = { Icon(icon, contentDescription = null, tint = cs.primary) },
+                        trailingContent = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.clickable { runCatching { uri.openUri(url) } },
+                    )
+                }
             }
         }
     }

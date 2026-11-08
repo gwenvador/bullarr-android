@@ -18,8 +18,8 @@ android {
         applicationId = "io.github.gwenvador.bullarr"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.6"
+        versionCode = 11
+        versionName = "1.7"
     }
 
     signingConfigs {
@@ -58,4 +58,6 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.security:security-crypto:1.1.0")
+    // Avatars proposés par le serveur (SVG).
+    implementation("com.caverock:androidsvg-aar:1.4")
 }

@@ -24,6 +24,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,7 +49,7 @@ import org.json.JSONObject
 
 /** Validation : /api/auto-acquire/reviews — choix manuels que la recherche automatique n'a pas pu trancher. */
 @Composable
-fun ValidationScreen(vm: AppViewModel) {
+fun ValidationScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit = { id, title -> vm.openSeriesById(id, title) }) {
     val api = vm.api ?: return
     var reviews by remember { mutableStateOf<List<JSONObject>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -63,6 +65,9 @@ fun ValidationScreen(vm: AppViewModel) {
             .toList()
     }
 
+    // Candidats en cours d'envoi : le serveur peut chercher le lien chez Prowlarr pendant ~15 s.
+    var sending by remember { mutableStateOf(setOf<Pair<Int, Int>>()) }
+
     suspend fun load() {
         loading = true; error = null
         try { reviews = api.getArray("api/auto-acquire/reviews").objects(); vm.reviewCount = reviews?.size ?: 0 } catch (e: Exception) { error = e.readable() }
@@ -75,9 +80,14 @@ fun ValidationScreen(vm: AppViewModel) {
 
     PullToRefreshBox(isRefreshing = loading && reviews != null, onRefresh = { scope.launch { load() } }, modifier = Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Comptes et demandes de BD à valider (il n'y a plus de page Demandes pour les administrateurs).
+            item(key = "requests") { AdminRequestsBlock(vm, onOpenSeries) }
+            item(key = "reviews-title") {
+                Text("Choix de téléchargement", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+            }
             if (loading && reviews == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             error?.let { e -> item { ErrorCard(e, onRetry = { scope.launch { load() } }) } }
-            if (reviews?.isEmpty() == true) item { EmptyState("Rien à valider", "Aucune décision manuelle en attente.") }
+            if (reviews?.isEmpty() == true) item { EmptyState("Rien à valider", "Aucun choix de téléchargement en attente.") }
             items(groups, key = { it.first }) { (key, entries) ->
                 val open = key in expanded
                 val first = entries.first()
@@ -113,8 +123,11 @@ fun ValidationScreen(vm: AppViewModel) {
                                 "Série non associée : à rattacher à Bédéthèque depuis l'interface web.",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary,
                             )
-                            entries.forEach { r -> ReviewEntry(r, showHeader = entries.size > 1, onIgnore = { ignore(listOf(it), "Ignoré") }) { id, idx ->
-                                launchAction(scope, context, "Téléchargement lancé", then = { scope.launch { load() } }) {
+                            entries.forEach { r -> ReviewEntry(r, showHeader = entries.size > 1, sending = sending, onIgnore = { ignore(listOf(it), "Ignoré") }) { id, idx ->
+                                if (id to idx in sending) return@ReviewEntry
+                                sending = sending + (id to idx)
+                                android.widget.Toast.makeText(context, "Envoi au client… (recherche du lien jusqu'à ~20 s)", android.widget.Toast.LENGTH_SHORT).show()
+                                launchAction(scope, context, "Téléchargement lancé", then = { sending = sending - (id to idx); scope.launch { load() } }) {
                                     val res = api.postObject("api/auto-acquire/reviews/$id/download", JSONObject().put("candidate_index", idx))
                                     if (res.optBoolean("success", true).not()) throw io.github.gwenvador.bullarr.data.ApiException(res.str("message") ?: "Échec du téléchargement")
                                 }
@@ -129,7 +142,7 @@ fun ValidationScreen(vm: AppViewModel) {
 
 /** Un tome à valider dans l'entrée de sa série : raison, candidats et leur bouton de téléchargement. */
 @Composable
-private fun ReviewEntry(r: JSONObject, showHeader: Boolean, onIgnore: (Int) -> Unit, onDownload: (Int, Int) -> Unit) {
+private fun ReviewEntry(r: JSONObject, showHeader: Boolean, sending: Set<Pair<Int, Int>>, onIgnore: (Int) -> Unit, onDownload: (Int, Int) -> Unit) {
     val id = r.int("id") ?: return
     val candidates = r.optJSONArray("candidates") ?: JSONArray()
     if (showHeader) {
@@ -153,7 +166,10 @@ private fun ReviewEntry(r: JSONObject, showHeader: Boolean, onIgnore: (Int) -> U
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = { onDownload(id, idx) }) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger ce candidat", tint = MaterialTheme.colorScheme.primary) }
+            if (id to idx in sending) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            }
+            else IconButton(onClick = { onDownload(id, idx) }) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger ce candidat", tint = MaterialTheme.colorScheme.primary) }
         }
     }
 }

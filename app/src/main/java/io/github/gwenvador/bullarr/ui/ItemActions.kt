@@ -1,7 +1,10 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.material.icons.outlined.AutoAwesome
+
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -175,12 +178,39 @@ fun SeriesEditDialog(d: SeriesDetail, onDismiss: () -> Unit, onSave: (Map<String
 /** Tag comme le site le range : minuscules, espaces remplacés par des tirets. */
 fun normalizeSeriesTag(raw: String): String = raw.trim().lowercase().replace(Regex("\\s+"), "-")
 
-/** Édition des tags d'une série : une tuile retire le tag, le champ en ajoute un. Enregistre tout d'un coup. */
+/**
+ * Édition des tags d'une série : une tuile retire le tag, le champ en ajoute un. Enregistre tout d'un coup.
+ * [onSuggest] : « Proposer avec l'IA » (POST /api/ai/series/<id>/suggest, rien n'est enregistré) ; les tags
+ * proposés s'ajoutent d'un appui et partent avec l'enregistrement normal. [onAiSettings] ouvre les réglages IA.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SeriesTagsDialog(initial: List<String>, onDismiss: () -> Unit, onSave: (List<String>) -> Unit) {
+fun SeriesTagsDialog(
+    initial: List<String>, onDismiss: () -> Unit,
+    /** Lance la proposition de l'IA dès l'ouverture (bouton IA de la fiche série). */
+    autoSuggest: Boolean = false,
+    onSuggest: (suspend () -> List<String>)? = null, onAiSettings: (() -> Unit)? = null,
+    onSave: (List<String>) -> Unit,
+) {
     var tags by remember { mutableStateOf(initial) }
     var draft by remember { mutableStateOf("") }
+    var suggested by remember { mutableStateOf<List<String>?>(null) }
+    var suggesting by remember { mutableStateOf(false) }
+    var aiError by remember { mutableStateOf<String?>(null) }
+    var aiDisabled by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    suspend fun suggest() {
+        val run = onSuggest ?: return
+        suggesting = true; aiError = null; aiDisabled = false
+        try { suggested = run() }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
+            aiError = aiErrorText(e)
+            aiDisabled = (e as? io.github.gwenvador.bullarr.data.ApiException)?.httpCode == 400
+        }
+        suggesting = false
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (autoSuggest) suggest() }
     // Le champ en cours compte aussi à l'enregistrement, même sans avoir touché « + ».
     fun withDraft(): List<String> {
         val tag = normalizeSeriesTag(draft)
@@ -190,12 +220,48 @@ fun SeriesTagsDialog(initial: List<String>, onDismiss: () -> Unit, onSave: (List
         onDismissRequest = onDismiss,
         title = { Text("Tags de la série") },
         text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (onSuggest != null) {
+                    val cs = MaterialTheme.colorScheme
+                    if (suggesting) Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
+                        Text("L'IA cherche des tags… (jusqu'à une minute)", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    } else androidx.compose.material3.OutlinedButton(onClick = { scope.launch { suggest() } }) {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+                        Text("Proposer avec l'IA")
+                    }
+                    aiError?.let { m ->
+                        Text(m, style = MaterialTheme.typography.bodySmall, color = cs.error)
+                        if (aiDisabled && onAiSettings != null) TextButton(onClick = { onDismiss(); onAiSettings() }) { Text("Ouvrir les réglages IA") }
+                    }
+                    suggested?.let { list ->
+                        val left = list.filter { it !in tags }
+                        if (list.isEmpty()) Text("L'IA n'a pas de nouveau tag à proposer.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        else if (left.isNotEmpty()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Proposés", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { tags = tags + left }) { Text("Tout ajouter") }
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                left.forEach { tag ->
+                                    androidx.compose.material3.SuggestionChip(
+                                        onClick = { tags = tags + tag },
+                                        label = { Text(tag) },
+                                        icon = { Icon(Icons.Outlined.Add, contentDescription = "Ajouter $tag", modifier = Modifier.size(18.dp)) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 if (tags.isEmpty()) Text("Aucun tag.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    tags.forEach { tag ->
+                    // Les tags ajoutés pendant l'édition passent en tête, en surbrillance : visibles sans défiler.
+                    (tags.filter { it !in initial } + tags.filter { it in initial }).forEach { tag ->
                         InputChip(
-                            selected = false,
+                            selected = tag !in initial,
                             onClick = { tags = tags - tag },
                             label = { Text(tag) },
                             trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Retirer $tag", modifier = Modifier.size(18.dp)) },

@@ -19,6 +19,29 @@ import kotlinx.coroutines.launch
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val settings = Settings(app)
+    init { io.github.gwenvador.bullarr.data.CoverLoader.init(app) }
+
+    // Cache disque de la bibliothèque (liste des bibliothèques et séries de chacune), propre au
+    // serveur et au compte : affichée tout de suite au lancement, puis rafraîchie par le réseau.
+    private val libCacheDir = java.io.File(app.filesDir, "library_cache").apply { mkdirs() }
+    private fun libCacheFile(name: String): java.io.File {
+        val who = "${settings.serverUrl}|${settings.authMode}|${settings.username}|${settings.apiKey.hashCode()}"
+        val h = java.security.MessageDigest.getInstance("SHA-1").digest(who.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
+        return java.io.File(libCacheDir, "${h}_$name.json")
+    }
+    private fun readLibCache(name: String): org.json.JSONArray? =
+        runCatching { libCacheFile(name).takeIf { it.isFile }?.readText()?.let { org.json.JSONArray(it) } }.getOrNull()
+    private fun writeLibCache(name: String, a: org.json.JSONArray) { runCatching { libCacheFile(name).writeText(a.toString()) } }
+    private fun clearLibCache() {
+        libCacheDir.listFiles()?.forEach { it.delete() }
+        io.github.gwenvador.bullarr.data.CoverLoader.clearDisk()
+    }
+    /** Séries déjà chargées, par bibliothèque : revenir sur une bibliothèque est instantané. */
+    private val seriesByLibrary = HashMap<Int, List<SeriesSummary>>()
+    /** Dernières fiches de série ouvertes (albums compris), pour les rouvrir sans attendre. */
+    val seriesDetailCache = object : java.util.LinkedHashMap<Int, io.github.gwenvador.bullarr.data.SeriesDetail>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, io.github.gwenvador.bullarr.data.SeriesDetail>?) = size > 60
+    }
 
     var api: BullarrApi? by mutableStateOf(buildApi())
         private set
@@ -34,7 +57,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         settings.password = pass
         settings.sessionCookie = cookie
         api = buildApi()
+        seriesByLibrary.clear(); seriesDetailCache.clear()
         libraries = emptyList(); series = emptyList(); libraryError = null; selectedLibrary = null
+        role = null; profileName = null; avatarUrl = null
     }
 
     /** Oublie la clé, la session et les identifiants (et prévient Bullarr si une session était ouverte). */
@@ -51,10 +76,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         runCatching { android.webkit.CookieManager.getInstance().removeAllCookies(null) }
+        clearLibCache(); seriesByLibrary.clear(); seriesDetailCache.clear()
         settings.serverUrl = ""; settings.apiKey = ""; settings.authMode = "key"
         settings.username = ""; settings.password = ""; settings.sessionCookie = ""
         api = null
         libraries = emptyList(); series = emptyList(); libraryError = null; selectedLibrary = null
+        role = null; profileName = null; avatarUrl = null; section = Section.Library
     }
 
     /** Connexion SSO par navigateur : état affiché sur l'écran de connexion. */
@@ -141,6 +168,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun goToSearch() { openSeries = null; section = Section.Search }
 
+    // Compte connecté (/api/auth/me) : rôle, nom et avatar. Un lecteur ne voit que la
+    // bibliothèque, ses demandes et quelques réglages (le serveur lui refuse le reste).
+    var role by mutableStateOf<String?>(null); private set
+    var profileName by mutableStateOf<String?>(null)
+    var avatarUrl by mutableStateOf<String?>(null)
+    val isReader get() = role == "reader"
+
+    suspend fun loadMe() {
+        val client = api ?: return
+        runCatching { client.getObject("api/auth/me") }.onSuccess { me ->
+            role = me.optString("role").ifBlank { "admin" }
+            val p = me.optJSONObject("profile")
+            val u = me.optJSONObject("user")
+            profileName = p?.optString("name")?.ifBlank { null } ?: u?.optString("name")?.ifBlank { null } ?: u?.optString("email")?.ifBlank { null }
+            avatarUrl = p?.optString("avatar_url")?.ifBlank { null }
+            if (isReader && section !in sections()) { section = Section.Library; openSeries = null }
+        }
+    }
+
+    /** Rubriques de la barre du bas selon le rôle. */
+    fun sections(): List<Section> =
+        if (isReader) listOf(Section.Library, Section.Requests, Section.Config)
+        else listOf(Section.Library, Section.Search, Section.Tracking, Section.Actions, Section.Config)
+
+    /** Sous-onglets d'une rubrique selon le rôle (les réglages du serveur sont réservés aux administrateurs). */
+    fun subsOf(s: Section): List<String> =
+        if (s == Section.Config && isReader) listOf("Profil", "Intégrations", "Apparence", "À propos") else s.subs
+
+    /** Demandes de BD et de comptes à valider (administrateurs). */
+    var requestCount by androidx.compose.runtime.mutableIntStateOf(0)
+
     fun openSeriesById(id: Int, title: String) {
         openSeries = series.firstOrNull { it.id == id }
             ?: SeriesSummary(id, title, null, null, null, 0, null, 0, false, "")
@@ -175,6 +233,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Pastilles des onglets de Suivi (mêmes sources que les badges du web : nav.js). */
     suspend fun refreshBadges() {
         val client = api ?: return
+        if (isReader) return
+        try { requestCount = client.getObject("api/requests/pending-count").int("total") ?: 0 } catch (_: Exception) {}
         try { reviewCount = client.getObject("api/auto-acquire/reviews/count").int("count") ?: 0 } catch (_: Exception) {}
         try { importCount = client.getObject("api/import/pending-count").int("waiting_file_count") ?: 0 } catch (_: Exception) {}
         try {
@@ -187,6 +247,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {}
     }
     var query by mutableStateOf("")
+    /** Où cherche la recherche de la bibliothèque : nom de la série (titre, auteur, univers) et/ou tags. */
+    var searchInName by mutableStateOf(true)
+    var searchInTags by mutableStateOf(true)
     var filters by mutableStateOf(LibraryFilters())
     /** Séries dans l'ordre affiché par la bibliothèque : le glissement passe à la voisine. */
     var visibleSeries: List<SeriesSummary> = emptyList()
@@ -200,6 +263,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var libraryGrid by mutableStateOf(libPrefs.getBoolean("grid", false))
         private set
     fun chooseLibraryGrid(on: Boolean) { libraryGrid = on; libPrefs.edit().putBoolean("grid", on).apply() }
+    /** Largeur minimale d'une miniature de la grille (dp), réglée par le curseur ; conservée sur l'appareil. */
+    var libraryCellSize by mutableStateOf(libPrefs.getFloat("cellSize", 108f))
+        private set
+    fun chooseLibraryCellSize(dp: Float) { libraryCellSize = dp; libPrefs.edit().putFloat("cellSize", dp).apply() }
     fun setSort(o: LibrarySort, desc: Boolean) {
         sort = o; sortDesc = desc
         libPrefs.edit().putString("sort", o.name).putBoolean("sortDesc", desc).apply()
@@ -208,16 +275,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun loadLibrary(force: Boolean = false, library: Library? = selectedLibrary) {
         val client = api ?: return
         if (libraryLoading || (!force && series.isNotEmpty() && library == selectedLibrary)) return
+        // Affichage immédiat depuis le cache (mémoire, sinon disque), puis rafraîchissement réseau.
+        if (libraries.isEmpty()) readLibCache("libraries")?.let { runCatching { libraries = parseLibraries(it) } }
+        val target = library?.let { l -> libraries.firstOrNull { it.id == l.id } } ?: libraries.firstOrNull()
+        if (target != null && series.isEmpty()) {
+            selectedLibrary = target
+            (seriesByLibrary[target.id] ?: readLibCache("series_${target.id}")?.let { runCatching { parseSeriesList(it) }.getOrNull() })
+                ?.let { series = it; seriesByLibrary[target.id] = it }
+        }
         libraryLoading = true; libraryError = null
         viewModelScope.launch {
             try {
-                val libs = if (force || libraries.isEmpty()) parseLibraries(client.getArray("api/libraries")) else libraries
+                val libs = run {
+                    client.getArray("api/libraries").also { writeLibCache("libraries", it) }.let { parseLibraries(it) }
+                }
                 libraries = libs
                 val lib = library?.let { l -> libs.firstOrNull { it.id == l.id } } ?: libs.firstOrNull()
+                if (lib?.id != selectedLibrary?.id) series = emptyList()
                 selectedLibrary = lib
-                series = if (lib == null) emptyList() else parseSeriesList(client.getArray("api/library/${lib.id}/series"))
+                if (lib == null) series = emptyList() else {
+                    val raw = client.getArray("api/library/${lib.id}/series")
+                    writeLibCache("series_${lib.id}", raw)
+                    val fresh = parseSeriesList(raw)
+                    seriesByLibrary[lib.id] = fresh
+                    // L'utilisateur a pu changer de bibliothèque pendant le chargement.
+                    if (selectedLibrary?.id == lib.id) series = fresh
+                }
             } catch (e: Exception) {
-                libraryError = e.readable()
+                // Hors réseau avec un cache : on garde la liste en cache sans bandeau d'erreur bloquant.
+                if (series.isEmpty()) libraryError = e.readable()
             } finally {
                 libraryLoading = false
             }
@@ -227,11 +313,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Met à jour une ligne de la bibliothèque après une modification faite sur sa fiche, sans recharger. */
     fun updateSeriesRow(id: Int, change: (SeriesSummary) -> SeriesSummary) {
         series = series.map { if (it.id == id) change(it) else it }
+        selectedLibrary?.let { seriesByLibrary[it.id] = series }
     }
 
     fun selectLibrary(lib: Library) {
         if (lib.id == selectedLibrary?.id) return
         series = emptyList()
-        loadLibrary(force = false, library = lib)
+        // Affiche aussitôt la version en cache puis la rafraîchit.
+        loadLibrary(force = true, library = lib)
     }
 }

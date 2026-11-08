@@ -236,7 +236,7 @@ internal fun ConfigCard(api: BullarrApi, snackbar: SnackbarHostState, e: ConfigE
     val hasEnabled = e.spec.fields.any { it.key == "enabled" }
     val enabled = (o?.getPath("enabled") as? Boolean)
 
-    Card(Modifier.fillMaxWidth().animateContentSize(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
+    Card(Modifier.fillMaxWidth().animateContentSize(), colors = CardDefaults.cardColors()) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             ConfigBadge(e.spec)
             Spacer(Modifier.width(14.dp))

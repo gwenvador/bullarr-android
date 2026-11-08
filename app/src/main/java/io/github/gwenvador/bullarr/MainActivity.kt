@@ -1,5 +1,10 @@
 package io.github.gwenvador.bullarr
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.material.icons.Icons
@@ -120,21 +125,23 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
     }
 
     val openSeries: (Int, String) -> Unit = { id, title -> vm.openSeriesById(id, title) }
+    androidx.compose.runtime.LaunchedEffect(vm.api) { vm.loadMe() }
     BackHandler(enabled = vm.openSeries != null) { vm.openSeries = null }
     BackHandler(enabled = vm.openSeries == null && vm.section != Section.Library) { vm.section = Section.Library }
+    BackHandler(enabled = vm.openSeries == null && vm.section == Section.Library && (vm.subTab[Section.Library] ?: 0) != 0) { vm.subTab[Section.Library] = 0 }
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 NavigationBar {
-                    Section.entries.forEach { s ->
+                    vm.sections().forEach { s ->
                         NavigationBarItem(
                             selected = vm.section == s,
                             onClick = { vm.openSeries = null; vm.section = s },
                             icon = {
                                 androidx.compose.material3.BadgedBox(badge = {
-                                    val n = if (s == Section.Tracking) vm.importCount + vm.newsCount + vm.reviewCount else 0
+                                    val n = if (s == Section.Tracking) vm.importCount + vm.newsCount + vm.reviewCount + vm.requestCount else 0
                                     if (n > 0) androidx.compose.material3.Badge { Text(if (n > 99) "99+" else "$n") }
                                 }) { Icon(s.icon, contentDescription = null) }
                             },
@@ -156,15 +163,16 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                     io.github.gwenvador.bullarr.ui.Polling(60_000, vm.api) { vm.refreshBadges() }
                     Column(Modifier.fillMaxSize()) {
                         val sub = vm.subTab[section] ?: 0
-                        if (section.subs.isNotEmpty()) {
-                            PrimaryScrollableTabRow(selectedTabIndex = sub, edgePadding = 8.dp) {
-                                section.subs.forEachIndexed { i, label ->
-                                    Tab(selected = sub == i, onClick = { vm.subTab[section] = i; if (section == Section.Tracking && label == "Nouveautés") vm.markNewsSeen() }, text = {
+                        val subs = vm.subsOf(section)
+                        if (subs.isNotEmpty()) {
+                            PrimaryScrollableTabRow(selectedTabIndex = sub.coerceIn(0, subs.size - 1), edgePadding = 8.dp) {
+                                subs.forEachIndexed { i, label ->
+                                    Tab(selected = sub == i, modifier = Modifier.height(40.dp), onClick = { vm.subTab[section] = i; if (section == Section.Tracking && label == "Nouveautés") vm.markNewsSeen() }, text = {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Text(label, maxLines = 1)
                                             val n = if (section == Section.Tracking) when (label) {
                                                 "Activité" -> vm.activityCount + vm.importCount
-                                                "Nouveautés" -> vm.newsCount; "Validation" -> vm.reviewCount; else -> 0
+                                                "Nouveautés" -> vm.newsCount; "Validation" -> vm.reviewCount + vm.requestCount; else -> 0
                                             } else 0
                                             if (n > 0) androidx.compose.material3.Badge { Text(if (n > 99) "99+" else "$n") }
                                         }
@@ -174,8 +182,18 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                         }
                         Box(Modifier.fillMaxSize()) {
                             when (section) {
-                                Section.Library -> if (sub == 0) LibraryScreen(vm) { vm.openSeries = it } else OfflineScreen(vm)
+                                Section.Library -> if (sub == 0) LibraryScreen(vm) { vm.openSeries = it } else Column(Modifier.fillMaxSize()) {
+                                    // Hors ligne, ouvert depuis le bouton de la bibliothèque : flèche retour + titre.
+                                    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { vm.subTab[Section.Library] = 0 }) {
+                                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Retour à la bibliothèque")
+                                        }
+                                        Text("Hors ligne", style = MaterialTheme.typography.titleMedium)
+                                    }
+                                    OfflineScreen(vm)
+                                }
                                 Section.Search -> SearchScreen(vm)
+                                Section.Requests -> io.github.gwenvador.bullarr.ui.RequestsScreen(vm, openSeries)
                                 Section.Tracking -> when (sub) {
                                     0 -> ActivityScreen(vm, snackbar)
                                     1 -> {
@@ -190,17 +208,21 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     1 -> MonitorScreen(vm, snackbar, openSeries)
                                     else -> VerificationScreen(vm, snackbar, openSeries)
                                 }
-                                Section.Config -> when (sub) {
-                                    0 -> LoginScreen(vm, firstRun = false, onSaved = {})
-                                    1 -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
-                                    2 -> ConfigScreen(vm, snackbar, INDEXERS)
-                                    3 -> ConfigScreen(vm, snackbar, CLIENTS)
-                                    4 -> io.github.gwenvador.bullarr.ui.NotificationsScreen(vm, snackbar)
-                                    5 -> ConfigScreen(vm, snackbar, IMPORTS)
-                                    6 -> ConfigScreen(vm, snackbar, SEARCH)
-                                    7 -> ConfigScreen(vm, snackbar, MONITOR)
-                                    8 -> ConfigScreen(vm, snackbar, ACCESS)
-                                    else -> WebSettingsScreen(vm)
+                                // Routage par nom : la liste des onglets dépend du rôle (voir AppViewModel.subsOf).
+                                Section.Config -> when (subs.getOrNull(sub) ?: subs.last()) {
+                                    "Indexeurs" -> ConfigScreen(vm, snackbar, INDEXERS)
+                                    "Clients" -> ConfigScreen(vm, snackbar, CLIENTS)
+                                    "Intégrations" -> io.github.gwenvador.bullarr.ui.IntegrationsScreen(vm)
+                                    "Notifications" -> io.github.gwenvador.bullarr.ui.NotificationsScreen(vm, snackbar)
+                                    "Imports" -> ConfigScreen(vm, snackbar, IMPORTS)
+                                    "Recherche" -> ConfigScreen(vm, snackbar, SEARCH)
+                                    "Surveillance" -> ConfigScreen(vm, snackbar, MONITOR)
+                                    "Apparence" -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
+                                    "Accès" -> ConfigScreen(vm, snackbar, ACCESS, header = { LoginScreen(vm, firstRun = false, onSaved = {}, embedded = true) })
+                                    "IA" -> io.github.gwenvador.bullarr.ui.AiSettingsScreen(vm, snackbar)
+                                    "Web" -> WebSettingsScreen(vm)
+                                    "Profil" -> io.github.gwenvador.bullarr.ui.ProfileScreen(vm)
+                                    else -> io.github.gwenvador.bullarr.ui.AboutScreen(vm)
                                 }
                             }
                         }
