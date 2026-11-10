@@ -413,6 +413,8 @@ private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.b
                 val series = vm.series.firstOrNull { it.id == r.seriesId }
                 Column(
                     Modifier.width(92.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).clickable {
+                        // Ouvrir la fiche sous la liseuse : le retour ramène à la série, pas à la bibliothèque.
+                        r.seriesId?.takeIf { it > 0 }?.let { vm.openSeriesById(it, r.seriesTitle ?: "") }
                         vm.reading = ReaderTarget(r.volumeId, listOfNotNull(r.seriesTitle, r.label).joinToString(" · "))
                     },
                     verticalArrangement = Arrangement.spacedBy(4.dp),

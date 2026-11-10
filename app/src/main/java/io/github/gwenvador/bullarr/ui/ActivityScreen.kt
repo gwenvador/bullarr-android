@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Link
@@ -273,6 +275,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         w, detail = importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)], selected = "w-${w.key}" in selected,
                         onLongClick = { if (w.trackingId != null) toggle("w-${w.key}") },
                         onTap = { if (selected.isNotEmpty() && w.trackingId != null) toggle("w-${w.key}") },
+                        onRetry = { path -> retryImportFile(api, path) { importInfo.reload() } },
                     )
                 }
             }
@@ -450,8 +453,14 @@ private fun ActionButton(label: String, icon: ImageVector, busy: Boolean, onClic
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun WaitingCard(w: WaitingFile, detail: WaitingDetail?, selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit) {
+private fun WaitingCard(
+    w: WaitingFile, detail: WaitingDetail?, selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit,
+    onRetry: suspend (String) -> String,
+) {
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var retrying by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().selectable(selected, onLongClick, onTap),
         colors = CardDefaults.cardColors(containerColor = if (selected) cs.primaryContainer else cs.surfaceContainer),
@@ -475,6 +484,21 @@ private fun WaitingCard(w: WaitingFile, detail: WaitingDetail?, selected: Boolea
                 style = MaterialTheme.typography.bodySmall,
                 color = if (reason != null) cs.tertiary else cs.onSurfaceVariant,
             )
+        }
+        // Fichier refusé (incomplet, copie pas finie, échec de lecture) : le serveur le retente
+        // seul (5 s, 10 s, 30 s puis toutes les 30 min) ; « Réessayer » le revérifie tout de suite.
+        val path = detail?.filepath
+        val why = detail?.reason
+        if (path != null && why != null && (why.startsWith("Échec") || why.startsWith("Fichier"))) {
+            if (retrying) androidx.compose.material3.CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
+            else IconButton(onClick = {
+                retrying = true
+                scope.launch {
+                    val msg = runCatching { onRetry(path) }.getOrElse { it.readable() }
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                    retrying = false
+                }
+            }) { Icon(Icons.Outlined.Refresh, contentDescription = "Réessayer l'import") }
         }
         }
     }
@@ -537,4 +561,16 @@ private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrAp
     )
     val failures = res.optJSONArray("failures")?.let { a -> (0 until a.length()).map { a.opt(it).toString() } }.orEmpty()
     return (listOf(parts.joinToString(" · ").ifBlank { "Import terminé." }) + failures.take(3) + notes).joinToString("\n")
+}
+
+
+/** POST /api/import/rescan-file : revérifie un fichier refusé et efface son état d'échec, puis relance le scan. */
+private suspend fun retryImportFile(api: io.github.gwenvador.bullarr.data.BullarrApi, filepath: String, rescan: () -> Unit): String {
+    val r = api.postObject("api/import/rescan-file", JSONObject().put("filepath", filepath))
+    rescan()
+    return when {
+        r.optBoolean("success") && r.optBoolean("valid") -> "Fichier lisible : il sera importé."
+        r.optBoolean("success") -> "Toujours illisible : ${r.str("error") ?: "fichier incomplet"}. Le fichier n'est peut-être pas encore complet."
+        else -> r.str("error") ?: "Nouvelle vérification impossible."
+    }
 }

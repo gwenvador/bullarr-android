@@ -219,6 +219,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     "Surveillance" -> ConfigScreen(vm, snackbar, MONITOR)
                                     "Apparence" -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
                                     "Accès" -> ConfigScreen(vm, snackbar, ACCESS, header = { LoginScreen(vm, firstRun = false, onSaved = {}, embedded = true) })
+                                    "Utilisateurs" -> io.github.gwenvador.bullarr.ui.UsersScreen(vm)
                                     "IA" -> io.github.gwenvador.bullarr.ui.AiSettingsScreen(vm, snackbar)
                                     "Web" -> WebSettingsScreen(vm)
                                     "Profil" -> io.github.gwenvador.bullarr.ui.ProfileScreen(vm)

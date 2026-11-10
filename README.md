@@ -111,6 +111,8 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
   Surveillance. Chaque carte a un bouton Enregistrer et, quand l'API le permet, Tester.
   Indexeurs inclut le compte EBDZ et son scraping automatique, Imports le format de
   renommage, Accès la connexion à Bullarr (mot de passe, SSO), Apparence le thème et la palette de l'app.
+  Utilisateurs (administrateurs) gère les comptes : création, rôle, mot de passe, avatar, suppression,
+  bibliothèques permises et contrôle parental (genres masqués) de chaque lecteur.
   Un compte **lecteur** ne voit que Profil, Intégrations, Apparence et À propos : Intégrations relie son
   propre compte Komga. Le dernier onglet, Web,
   ouvre dans le navigateur ce qui n'est pas dans l'app : forums EBDZ, canaux Telegram,
@@ -168,6 +170,7 @@ le téléphone, abonnez-vous au topic ntfy configuré dans l'app [ntfy](https://
 | Nouveautés | RSS : `GET /api/ebdz/rss/latest` ; Telegram : `GET /api/telegram-channels/latest?days=15` ; EBDZ : `GET /api/ebdz/latest` |
 | Nouveautés, actions | envois ci-dessus ; ⚡ : `GET /api/bedetheque/info`, `POST /api/bedetheque/add-series`, `POST /api/auto-acquire/reviews/series-match`, `GET /api/search/prowlarr` |
 | Configuration | `GET`/`POST` `/api/{emule,qbittorrent,rtorrent,deluge,shelfmark,komga,prowlarr,fourtoutici,annas-archive,vk,telegram}/config`, `/api/ebdz/config`, `/api/ebdz/auto-scrape/config`, `/api/settings/rename`, `/api/auth/config`, `/api/import/config`, `/api/missing-monitor/config` ; tests : `…/test` |
+| Utilisateurs | `GET`/`POST`/`PUT`/`DELETE` `/api/auth/users`, `POST /api/auth/users/approve`, `PUT /api/auth/users/access`, `GET /api/auth/genres`, `POST`/`PUT`/`DELETE` `/api/auth/users/avatar` |
 | Historique | `GET /api/import/history`, `/api/missing-monitor/history`, `/api/actions/history` |
 | Enrichir | `GET /api/bedetheque/indispensables`, `/api/bedetheque/pantheon`, `POST /api/bedetheque/add-series` |
 | Surveillance | `GET /api/missing-monitor/libraries`, `/api/missing-monitor/libraries/<id>/series`, `POST /api/missing-monitor/series/<id>/monitor` |

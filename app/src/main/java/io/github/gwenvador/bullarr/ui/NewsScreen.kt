@@ -59,6 +59,9 @@ import androidx.compose.ui.Modifier
 import io.github.gwenvador.bullarr.data.str
 import io.github.gwenvador.bullarr.data.bool
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
@@ -251,6 +254,9 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
             .let { list -> if (tab == 0) list.sortedByDescending { it.date ?: "" } else list }
     }
 
+    val groups = remember(items) { groupConsecutiveSeries(items) }
+    val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
+
     Column(Modifier.fillMaxSize()) {
         PrimaryScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
             TABS.forEachIndexed { i, t ->
@@ -332,9 +338,35 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 if (!loading && items.isEmpty() && shownTypes.none { errors[it] != null }) {
                     item { EmptyState("Rien de neuf", "Aucune entrée récente.") }
                 }
-                itemsIndexed(items, key = { i, it -> "${it.type}-$i-${it.title.hashCode()}" }) { _, item ->
-                    NewsRow(vm, item, showType = tab == 0, genre = item.bedethequeUrl?.let { genres[it] }, onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it })
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Albums consécutifs d'une même série : une seule ligne « série », dépliable (comme le site).
+                groups.forEachIndexed { gi, members ->
+                    val first = members.first()
+                    val genreOf = { it: NewsItem -> it.bedethequeUrl?.let { u -> genres[u] } }
+                    if (members.size == 1) item(key = "${first.type}-$gi-${first.title.hashCode()}") {
+                        NewsRow(vm, first, showType = tab == 0, genre = genreOf(first), onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    } else {
+                        val groupId = "${newsGroupKey(first)}|${first.date}"
+                        val open = expandedGroups[groupId] == true
+                        item(key = "g-$gi-$groupId") {
+                            NewsGroupRow(first, members.size, showType = tab == 0, genre = genreOf(first), expanded = open) {
+                                if (open) expandedGroups.remove(groupId) else expandedGroups[groupId] = true
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        }
+                        if (open) members.forEachIndexed { mi, m ->
+                            item(key = "g-$gi-$groupId-$mi") {
+                                // Date, type et origine laissés vides quand ils répètent ceux de la ligne série.
+                                NewsRow(
+                                    vm, m, showType = tab == 0 && m.type != first.type,
+                                    genre = genreOf(m).takeIf { it != genreOf(first) },
+                                    onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it },
+                                    hideDate = m.date == first.date, nested = true,
+                                )
+                                HorizontalDivider(Modifier.padding(start = 28.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
                 }
                 val moreAvailable = !fullWindow || (hasMoreEbdz && shownTypes != listOf(NewsType.RSS))
                 if (feeds.isNotEmpty() && !loading && moreAvailable && shownTypes != listOf(NewsType.RSS)) item(key = "load-more") {
@@ -401,7 +433,10 @@ private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, onPick: (SeriesSu
 }
 
 @Composable
-private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onOpenSeries: (Int, String) -> Unit, onPickSeries: (NewsItem) -> Unit) {
+private fun NewsRow(
+    vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onOpenSeries: (Int, String) -> Unit, onPickSeries: (NewsItem) -> Unit,
+    hideDate: Boolean = false, nested: Boolean = false,
+) {
     val cs = MaterialTheme.colorScheme
     val uri = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
@@ -414,42 +449,32 @@ private fun NewsRow(vm: AppViewModel, item: NewsItem, showType: Boolean, genre: 
 
     Row(
         Modifier.fillMaxWidth().clickable(enabled = item.link != null) { item.link?.let { runCatching { uri.openUri(it) } } }
-            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = if (nested) 28.dp else 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            item.subtitle?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-            Text(item.title, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis,
-                color = if (item.subtitle != null) cs.onSurfaceVariant else cs.onSurface)
-            // FlowRow : les pastilles passent à la ligne au lieu de s'écraser.
+        // Présentation : 1) série + drapeau d'origine, 2) nom du fichier, 3) une seule ligne
+        // « source · heure · taille » suivie des états (possédé, envoyé…). Bédéthèque et les
+        // autres liens sont dans le menu ⋮, plus de rangée d'icônes à déchiffrer.
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Dans un groupe déplié, la série est déjà sur la ligne au-dessus : le fichier passe en titre.
+                Text(if (nested) item.title else item.subtitle ?: item.title,
+                    style = if (nested) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleSmall,
+                    fontWeight = if (nested) FontWeight.Medium else FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                GenreFlag(genre)
+            }
+            if (item.subtitle != null && !nested) Text(item.title, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
             androidx.compose.foundation.layout.FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
                 itemVerticalAlignment = Alignment.CenterVertically,
             ) {
-                // Icônes plutôt que texte ; le libellé apparaît au long appui.
-                if (showType) Logo(item.type.name.lowercase(), item.type.label, 20.dp)
-                when (genre) {
-                    "bd" -> Logo("bd", "BD", 20.dp)
-                    "comics" -> Logo("comics", "Comics", 20.dp)
-                    "manga" -> Logo("manga", "Manga", 20.dp)
-                }
-                if (item.owned) StatusIcon(Icons.Outlined.CheckCircle, "Possédé", cs.primary, 20.dp)
-                else if (item.inLibrary) StatusIcon(Icons.Outlined.CollectionsBookmark, "Série en bibliothèque", cs.secondary, 20.dp)
-                if (item.downloaded) StatusIcon(Icons.Outlined.DownloadDone, "Téléchargé", cs.tertiary, 20.dp)
-                if (sentTo != null) {
-                    val k = logoKey(sentTo)
-                    if (hasLogo(k)) Logo(k, "Envoyé à $sentTo", 20.dp)
-                    else StatusIcon(Icons.AutoMirrored.Outlined.Send, "Envoyé à $sentTo", cs.secondary, 20.dp)
-                }
-                item.bedethequeUrl?.let { bd ->
-                    Logo("bedetheque", "Ouvrir sur Bédéthèque", 22.dp, Modifier.clickable { runCatching { uri.openUri(bd) } })
-                }
-            }
-            val meta = listOfNotNull(item.source?.replace("Prowlarr · ", "")?.replace("Prowlarr — ", ""), item.date, formatBytes(item.sizeBytes)).joinToString(" · ")
-            if (meta.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                logoKey(item.source)?.takeIf { it != item.type.name.lowercase() || !showType }?.let { Logo(it, item.source ?: "", 14.dp) }
-                Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                SourceLine(item, showType, hideDate)
+                if (item.owned) Tag("Possédé", cs.primaryContainer, cs.onPrimaryContainer)
+                else if (item.inLibrary) Tag("Série suivie", cs.secondaryContainer, cs.onSecondaryContainer)
+                if (sentTo != null) Tag("Envoyé · $sentTo", cs.secondaryContainer, cs.onSecondaryContainer)
             }
         }
         if (item.files.isNotEmpty()) {
@@ -524,3 +549,99 @@ private const val NEWS_DAYS = 60
 
 /** Premier lot affiché par source, comme le site (NOUVEAUTES_INITIAL_LIMIT). */
 private const val NEWS_INITIAL_LIMIT = 100
+
+
+/**
+ * Clé de série d'une entrée (comme _nouveautesSeriesGroupKey du site) : série locale
+ * (matched_series_id pour EBDZ, series_id sinon), sinon fiche Bédéthèque, sinon titre de
+ * série normalisé ; null si rien ne permet de regrouper.
+ */
+internal fun newsGroupKey(item: NewsItem): String? {
+    item.seriesId?.let { return "s:$it" }
+    item.bedethequeUrl?.takeIf { it.isNotBlank() }?.let { return "b:$it" }
+    val r = item.raw
+    fun str(k: String) = r.optString(k, "").takeIf { it.isNotBlank() && it != "null" }
+    val title = if (item.type == NewsType.EBDZ) str("matched_series_title") ?: str("bedetheque_title") ?: str("title")
+    else str("series_title") ?: str("bedetheque_title") ?: str("parsed_title")
+    return title?.let { normalize(it).trim() }?.takeIf { it.isNotEmpty() }?.let { "t:$it" }
+}
+
+/** Regroupe les entrées CONSÉCUTIVES d'une même série ; un album d'une autre série coupe le groupe. */
+internal fun groupConsecutiveSeries(items: List<NewsItem>): List<List<NewsItem>> {
+    val out = mutableListOf<MutableList<NewsItem>>()
+    var lastKey: String? = null
+    for (it in items) {
+        val k = newsGroupKey(it)
+        if (k != null && k == lastKey) out.last().add(it) else out.add(mutableListOf(it))
+        lastKey = k
+    }
+    return out
+}
+
+/** Ligne « série » d'un groupe replié : nom, nombre d'albums, date / type / origine du plus récent. */
+@Composable
+private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: String?, expanded: Boolean, onToggle: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(first.seriesTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                GenreFlag(genre)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Tag("$count albums", cs.secondaryContainer, cs.onSecondaryContainer)
+                SourceLine(first, showType, hideDate = false, withSize = false)
+            }
+        }
+        Icon(
+            if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
+            contentDescription = if (expanded) "Replier" else "Déplier les albums", tint = cs.onSurfaceVariant,
+            modifier = Modifier.padding(start = 6.dp),
+        )
+    }
+}
+
+
+/** Drapeau d'origine (BD = France, Comics = USA, Manga = Japon), discret, à côté du titre. */
+@Composable
+private fun GenreFlag(genre: String?) {
+    when (genre) {
+        "bd" -> Logo("bd", "BD", 14.dp)
+        "comics" -> Logo("comics", "Comics", 14.dp)
+        "manga" -> Logo("manga", "Manga", 14.dp)
+    }
+}
+
+/** « [logo] C411 · 14:21 · 37 Mo » : un seul logo (celui de la source, sinon le type RSS / Telegram / EBDZ). */
+@Composable
+private fun SourceLine(item: NewsItem, showType: Boolean, hideDate: Boolean, withSize: Boolean = true) {
+    val cs = MaterialTheme.colorScheme
+    val source = item.source?.replace("Prowlarr · ", "")?.replace("Prowlarr — ", "")
+    val srcKey = logoKey(item.source)?.takeIf { hasLogo(it) }
+    val text = listOfNotNull(source ?: item.type.label, item.date?.takeUnless { hideDate }?.let { shortNewsDate(it) },
+        if (withSize) formatBytes(item.sizeBytes) else null).joinToString(" · ")
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        when {
+            srcKey != null -> Logo(srcKey, source ?: "", 14.dp)
+            showType || source == null -> Logo(item.type.name.lowercase(), item.type.label, 14.dp)
+        }
+        Text(text, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** « 2026-11-09 14:21 » → « 14:21 » aujourd'hui, « hier 14:21 », sinon « 7 nov. 14:21 ». */
+internal fun shortNewsDate(d: String): String {
+    val date = runCatching { java.time.LocalDate.parse(d.take(10)) }.getOrNull() ?: return d
+    val time = d.drop(11).take(5)
+    val today = java.time.LocalDate.now()
+    val day = when (date) {
+        today -> null
+        today.minusDays(1) -> "hier"
+        else -> date.format(java.time.format.DateTimeFormatter.ofPattern(if (date.year == today.year) "d MMM" else "d MMM yyyy", java.util.Locale.FRENCH))
+    }
+    return listOfNotNull(day, time.ifBlank { null }).joinToString(" ")
+}

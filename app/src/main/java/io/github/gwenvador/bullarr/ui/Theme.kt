@@ -26,7 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BrightnessAuto
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DarkMode
@@ -264,7 +264,7 @@ fun ThemePicker(modifier: Modifier = Modifier) {
                     icon = {
                         Icon(
                             when (m) {
-                                ThemeMode.System -> Icons.Outlined.BrightnessAuto
+                                ThemeMode.System -> Icons.Outlined.PhoneAndroid
                                 ThemeMode.Light -> Icons.Outlined.LightMode
                                 ThemeMode.Dark -> Icons.Outlined.DarkMode
                             },
