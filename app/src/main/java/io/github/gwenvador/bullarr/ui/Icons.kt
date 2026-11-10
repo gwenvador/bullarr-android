@@ -40,6 +40,7 @@ private val LOGOS = mapOf(
     "komga" to R.drawable.src_komga,
     "ntfy" to R.drawable.src_ntfy,
     "bedetheque" to R.drawable.bedetheque_logo,
+    "fnac" to R.drawable.shop_fnac, "amazon" to R.drawable.shop_amazon, "bdfugue" to R.drawable.shop_bdfugue,
     // Genre / origine : même convention que la page web (BD = drapeau français).
     "bd" to R.drawable.src_flag_france, "europe" to R.drawable.src_flag_france,
     "comics" to R.drawable.src_flag_us, "usa" to R.drawable.src_flag_us,

@@ -338,7 +338,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                     if (!vm.libraryLoading && vm.libraryError == null && vm.libraries.isEmpty()) {
                         EmptyState("Aucune bibliothèque", "Créez-en une dans l'interface web de Bullarr.")
                     }
-                    if (showRecent) ContinueReading(vm, recent, syncing = syncing, onSync = if (vm.keepReading != null) ({ syncKeepReading() }) else null)
+                    if (showRecent) ContinueReading(vm, recent)
                     if (filtered.isEmpty() && vm.series.isNotEmpty()) Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         EmptyState("Aucun résultat", if (q.isNotBlank()) "pour « $q »" + (if (!filters.isEmpty) " avec ces filtres" else "") else "Aucune série ne correspond aux filtres.")
                         if (!filters.isEmpty) androidx.compose.material3.TextButton(onClick = { vm.filters = LibraryFilters() }) { Text("Réinitialiser les filtres") }
@@ -386,7 +386,7 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
 
 /** « Continuer la lecture » : les albums commencés, couverture et avancement ; un appui reprend la lecture. */
 @Composable
-private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.bullarr.data.RecentRead>, syncing: Boolean, onSync: (() -> Unit)?) {
+private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.bullarr.data.RecentRead>) {
     val cs = MaterialTheme.colorScheme
     // Replié par défaut ; l'état est mémorisé sur l'appareil (changer de page ou relancer l'app le garde).
     val prefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("library_ui", android.content.Context.MODE_PRIVATE)
@@ -399,10 +399,6 @@ private fun ContinueReading(vm: AppViewModel, recent: List<io.github.gwenvador.b
             Text("Continuer la lecture", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(" · ${recent.size}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
-            if (syncing) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-            else if (onSync != null) IconButton(onClick = onSync, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Outlined.Sync, contentDescription = "Synchroniser avec Komga", tint = cs.onSurfaceVariant)
-            }
             androidx.compose.material3.Icon(
                 if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
                 contentDescription = if (expanded) "Replier" else "Déplier", tint = cs.onSurfaceVariant,

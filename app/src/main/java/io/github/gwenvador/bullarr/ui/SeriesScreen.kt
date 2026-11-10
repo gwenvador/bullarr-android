@@ -99,6 +99,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.gwenvador.bullarr.data.CoverLoader
 import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.RemoveDone
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.AutoStories
 import kotlin.math.abs
@@ -171,6 +172,18 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
     fun setList(toReadLater: Boolean? = null, isFavorite: Boolean? = null) = launchAction(scope, context, "Liste mise à jour", then = { attempt++ }) {
         ItemActions.setSeriesReadingLists(api, summary.id, toReadLater, isFavorite)
         vm.updateSeriesRow(summary.id) { row -> row.copy(toReadLater = toReadLater ?: row.toReadLater, isFavorite = isFavorite ?: row.isFavorite) }
+    }
+    // Lu / non lu : même logique que le lecteur (avancement local, compte Komga relié ou Komga du serveur).
+    fun setVolumeRead(v: VolumeRow, read: Boolean) = launchAction(scope, context, if (read) "${v.label} marqué comme lu" else "${v.label} marqué comme non lu", then = { vm.progressVersion++ }) {
+        val res = api.postObject("api/volumes/${v.id}/read-status", JSONObject().put("read", read))
+        if (!res.optBoolean("success", true)) throw io.github.gwenvador.bullarr.data.ApiException(res.str("error") ?: "Impossible de changer l'état de lecture")
+    }
+    fun setSeriesRead(read: Boolean) {
+        val msg = if (read) "Série marquée comme lue" else "Série marquée comme non lue"
+        launchAction(scope, context, msg, then = { vm.progressVersion++ }) {
+            val res = api.postObject("api/series/${summary.id}/read-status", JSONObject().put("read", read))
+            if (!res.optBoolean("success", true)) throw io.github.gwenvador.bullarr.data.ApiException(res.str("error") ?: "Impossible de changer l'état de lecture")
+        }
     }
     fun saveTags(tags: List<String>) = launchAction(scope, context, "Tags enregistrés", then = { attempt++ }) {
         ItemActions.setSeriesTags(api, summary.id, tags)
@@ -335,6 +348,8 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
             onReviews = { reviewsFor = v },
             onHistory = { showHistory = true },
             onDelete = { deleting = v },
+            read = komga[v.id]?.completed == true,
+            onToggleRead = { setVolumeRead(v, komga[v.id]?.completed != true) },
         )
     }
     reviewsFor?.let { v -> ReviewsSheet(api, v, "${detail?.title ?: summary.title} · ${v.label}", onDismiss = { reviewsFor = null }) }
@@ -360,6 +375,9 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         onScan = { launchAction(scope, context, "Scan lancé") { ItemActions.scanSeries(api, summary.id) } },
         onEdit = { editingSeries = true },
         onDelete = { confirmDeleteSeries = true },
+        allRead = detail?.volumes?.filter { it.owned }?.let { o -> o.isNotEmpty() && o.all { komga[it.id]?.completed == true } } == true,
+        canMarkRead = detail?.volumes?.any { it.owned } == true,
+        onToggleRead = { read -> setSeriesRead(read) },
     )
     if (editingSeries) detail?.let { d ->
         SeriesEditDialog(d, onDismiss = { editingSeries = false }) { changed ->
@@ -392,7 +410,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         )
     }
     shown?.let { v ->
-        VolumeSheet(vm, v, detail, summary, onDismiss = { shown = null }, onRead = {
+        VolumeSheet(vm, v, detail, summary, read = komga[v.id]?.completed == true, onToggleRead = { setVolumeRead(v, komga[v.id]?.completed != true) }, onDismiss = { shown = null }, onRead = {
             shown = null
             vm.reading = ReaderTarget(v.id, "${detail?.title ?: summary.title} · ${v.label}")
         }, onAuthor = { name ->
@@ -430,7 +448,18 @@ private fun Header(
             val coverUrl = vm.coverUrl(d?.coverPath ?: s.coverPath)
             var big by remember { mutableStateOf(false) }
             Cover(coverUrl, 104.dp, Modifier.clickable { big = true })
-            if (big) FullCover(coverUrl, onDismiss = { big = false })
+            if (big) {
+                // Couverture puis pages d'aperçu du premier tome possédé (GET /api/series/<id>/preview-pages), comme le site.
+                var pages by remember(s.id) { mutableStateOf<List<String>>(emptyList()) }
+                LaunchedEffect(s.id) {
+                    runCatching { vm.api?.getObject("api/series/${s.id}/preview-pages") }.getOrNull()?.optJSONArray("pages")?.let { a ->
+                        pages = (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } }
+                    }
+                }
+                val images = listOf(GalleryImage(coverUrl ?: "cover") { coverUrl?.let { CoverLoader.load(it, 1600, key = "$it#big") } }) +
+                    pages.mapNotNull { p -> vm.coverUrl(p)?.let { u -> GalleryImage(u) { CoverLoader.load(u, 1600, key = "$u#big") } } }
+                ImageGallery(images, onDismiss = { big = false })
+            }
             Spacer(Modifier.width(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -630,7 +659,7 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongC
 /** Fiche d'un tome : couverture, résumé et métadonnées ComicInfo, fichier ; la recherche est un bouton à part. */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, summary: SeriesSummary, onDismiss: () -> Unit, onRead: () -> Unit, onReviews: () -> Unit, onAuthor: (String) -> Unit, onSearch: () -> Unit) {
+private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, summary: SeriesSummary, read: Boolean, onToggleRead: () -> Unit, onDismiss: () -> Unit, onRead: () -> Unit, onReviews: () -> Unit, onAuthor: (String) -> Unit, onSearch: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val ci = v.comicInfo
@@ -639,7 +668,17 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, s
         LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
             item {
                 Row {
-                    Cover(vm.coverUrl(v.coverPath), 110.dp)
+                    var big by remember(v.id) { mutableStateOf(false) }
+                    val coverUrl = vm.coverUrl(v.coverPath)
+                    Cover(coverUrl, 110.dp, Modifier.clickable { big = true })
+                    if (big) {
+                        // Couverture puis quelques pages de l'album (pages du lecteur), comme l'aperçu de la fiche série.
+                        val api = vm.api
+                        val pages = if (v.owned && api != null) previewPageNumbers(v.pageCount) else emptyList()
+                        val images = listOf(GalleryImage(coverUrl ?: "cover") { coverUrl?.let { CoverLoader.load(it, 1600, key = "$it#big") } }) +
+                            pages.map { n -> GalleryImage("${v.id}:$n") { io.github.gwenvador.bullarr.data.PageCache.get(api!!, v.id, n, vm.offline.store) } }
+                        ImageGallery(images, onDismiss = { big = false })
+                    }
                     Spacer(Modifier.width(16.dp))
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(v.label, style = MaterialTheme.typography.labelLarge, color = cs.primary)
@@ -665,6 +704,11 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, s
                 ) {
                     if (v.owned) WithTip("Lire") {
                         androidx.compose.material3.FilledIconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire") }
+                    }
+                    if (v.owned) WithTip(if (read) "Marquer comme non lu" else "Marquer comme lu") {
+                        androidx.compose.material3.FilledTonalIconButton(onClick = onToggleRead) {
+                            Icon(if (read) Icons.Outlined.RemoveDone else Icons.Outlined.DoneAll, contentDescription = if (read) "Marquer comme non lu" else "Marquer comme lu")
+                        }
                     }
                     if (v.owned) OfflineButton(vm, v.id, "${detail?.title ?: summary.title} · ${v.label}", iconOnly = true)
                     WithTip(if (v.owned) "Chercher (remplacer)" else "Chercher ce tome") {
@@ -743,6 +787,7 @@ private fun VolumeGroupHeader(label: String, owned: Int, total: Int, collapsed: 
 @Composable
 private fun SeriesActions(
     title: String, onDismiss: () -> Unit, onReadAlso: () -> Unit, onHistory: () -> Unit, onUpdate: () -> Unit, onScan: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
+    allRead: Boolean = false, canMarkRead: Boolean = false, onToggleRead: (Boolean) -> Unit = {},
 ) {
     @Composable
     fun Entry(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color? = null, action: () -> Unit) {
@@ -755,6 +800,10 @@ private fun SeriesActions(
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 24.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            if (canMarkRead) {
+                if (allRead) Entry(Icons.Outlined.RemoveDone, "Marquer la série comme non lue") { onToggleRead(false) }
+                else Entry(Icons.Outlined.DoneAll, "Marquer la série comme lue") { onToggleRead(true) }
+            }
             Entry(Icons.Outlined.Sync, "Mettre à jour (Bédéthèque)", action = onUpdate)
             Entry(Icons.Outlined.Refresh, "Scanner les fichiers", action = onScan)
             Entry(Icons.Outlined.Edit, "Éditer la série", action = onEdit)
@@ -972,14 +1021,43 @@ private fun AuthorAlbumsSheet(vm: AppViewModel, api: BullarrApi, name: String, l
 
 /** Couverture en grand, plein écran ; un appui la ferme. */
 @Composable
-private fun FullCover(url: String?, onDismiss: () -> Unit) {
-    var bitmap by remember(url) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(url) { if (url != null) bitmap = CoverLoader.load(url, 1600, key = "$url#big") }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
-            val b = bitmap
-            if (b != null) Image(b.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-            else CircularProgressIndicator(color = Color.White)
+private fun FullCover(url: String?, onDismiss: () -> Unit) =
+    ImageGallery(listOf(GalleryImage(url ?: "") { url?.let { CoverLoader.load(it, 1600, key = "$it#big") } }), onDismiss)
+
+/** Une image de la visionneuse : clé stable et chargement à la demande. */
+private class GalleryImage(val key: String, val load: suspend () -> Bitmap?)
+
+/** Pages d'aperçu d'un album (comme le site) : réparties dans l'album, jamais la couverture ni la dernière page. */
+private fun previewPageNumbers(total: Int?): List<Int> {
+    if (total == null || total < 3) return emptyList()
+    return listOf(0.20, 0.40, 0.60, 0.75).map { (it * total).toInt().coerceIn(1, total - 2) + 1 }.distinct()
+}
+
+/** Visionneuse plein écran : couverture puis pages d'aperçu, glisser pour passer de l'une à l'autre, toucher pour fermer. */
+@Composable
+private fun ImageGallery(images: List<GalleryImage>, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val pager = androidx.compose.foundation.pager.rememberPagerState { images.size }
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), key = { images.getOrNull(it)?.key ?: it }) { i ->
+                val img = images[i]
+                var bitmap by remember(img.key) { mutableStateOf<Bitmap?>(null) }
+                var failed by remember(img.key) { mutableStateOf(false) }
+                LaunchedEffect(img.key) { bitmap = runCatching { img.load() }.getOrNull(); failed = bitmap == null }
+                Box(Modifier.fillMaxSize().clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
+                    val b = bitmap
+                    if (b != null) Image(b.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                    else if (failed) Text("Image indisponible", color = Color.White)
+                    else CircularProgressIndicator(color = Color.White)
+                }
+            }
+            if (images.size > 1) Text(
+                "${pager.currentPage + 1} / ${images.size}",
+                color = Color.White, style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
         }
     }
 }
@@ -990,6 +1068,7 @@ private fun FullCover(url: String?, onDismiss: () -> Unit) {
 private fun VolumeActions(
     v: VolumeRow, title: String, onDismiss: () -> Unit, onEdit: () -> Unit,
     onRefresh: () -> Unit, onMeta: () -> Unit, onReviews: () -> Unit, onHistory: () -> Unit, onDelete: () -> Unit,
+    read: Boolean = false, onToggleRead: () -> Unit = {},
 ) {
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     @Composable
@@ -1003,8 +1082,9 @@ private fun VolumeActions(
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 24.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-            ItemActions.shopLinks(v.isbn ?: title.replace(" · ", " ")).forEach { (shop, url) ->
-                Entry(Icons.Outlined.ShoppingCart, "Acheter sur $shop") { runCatching { uri.openUri(url) } }
+            if (v.owned) {
+                if (read) Entry(Icons.Outlined.RemoveDone, "Marquer comme non lu", action = onToggleRead)
+                else Entry(Icons.Outlined.DoneAll, "Marquer comme lu", action = onToggleRead)
             }
             Entry(Icons.Outlined.Star, "Lire les avis", action = onReviews)
             Entry(Icons.Outlined.History, "Historique", action = onHistory)
@@ -1012,6 +1092,20 @@ private fun VolumeActions(
             if (v.owned) Entry(Icons.Outlined.Refresh, "Actualiser taille et pages", action = onRefresh)
             Entry(Icons.Outlined.Sync, "Recharger la fiche Bédéthèque", action = onMeta)
             Entry(Icons.Outlined.Delete, "Supprimer", MaterialTheme.colorScheme.error, onDelete)
+            // Une seule ligne « Acheter » : un logo par boutique, chacun ouvre sa recherche.
+            androidx.compose.material3.ListItem(
+                headlineContent = { Text("Acheter") },
+                leadingContent = { Icon(Icons.Outlined.ShoppingCart, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                trailingContent = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ItemActions.shopLinks(v.isbn ?: title.replace(" · ", " ")).forEach { (shop, url) ->
+                            IconButton(onClick = { onDismiss(); runCatching { uri.openUri(url) } }) {
+                                Logo(shop.lowercase(), "Acheter sur $shop", 28.dp, tip = false)
+                            }
+                        }
+                    }
+                },
+            )
         }
     }
 }
