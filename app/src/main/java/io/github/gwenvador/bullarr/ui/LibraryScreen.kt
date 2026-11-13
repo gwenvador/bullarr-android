@@ -96,7 +96,12 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
         val terms = normalize(q).split(' ').filter { it.isNotBlank() }
         // Chaque mot doit se trouver dans le nom ou dans les tags, selon les cases cochées.
         fun hit(s: SeriesSummary, t: String) = (inName && t in s.nameKey) || (inTags && t in s.tagsKey)
-        vm.sort.sorted(vm.series.filter { s -> (terms.isEmpty() || terms.all { hit(s, it) }) && filters.matches(s) }, vm.sortDesc)
+        // Séries sans aucun volume disponible : masquées par défaut ; visibles en cherchant leur nom
+        // ou avec le filtre « Nombre de volumes → Aucun ».
+        val showEmpty = terms.isNotEmpty() || "0" in filters.volumes
+        vm.sort.sorted(vm.series.filter { s ->
+            (showEmpty || s.volumeCount > 0) && (terms.isEmpty() || terms.all { hit(s, it) }) && filters.matches(s)
+        }, vm.sortDesc)
     }
     androidx.compose.runtime.SideEffect { vm.visibleSeries = filtered }
     var sortMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -167,7 +172,8 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 IconButton(onClick = { batch("Scan lancé", true) { a, id -> ItemActions.scanSeries(a, id) } }) { Icon(Icons.Outlined.Refresh, contentDescription = "Scanner les fichiers") }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Outlined.Delete, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error) }
                 }
-            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalMinimumInteractiveComponentSize provides 0.dp) {
                 // Pas de « + » ici : l'ajout de série se fait depuis Recherche.
                 CompactSearchField(
                     value = q, onValueChange = { vm.query = it },
@@ -176,10 +182,10 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                         inTags -> "Tag…"
                         else -> "Série, auteur…"
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(end = 4.dp),
                 )
                 Box {
-                    IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier") }
+                    IconButton(onClick = { sortMenu = true }, modifier = Modifier.size(38.dp)) { Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Trier") }
                     androidx.compose.material3.DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                         LibrarySort.entries.forEach { o ->
                             androidx.compose.material3.DropdownMenuItem(
@@ -206,20 +212,21 @@ fun LibraryScreen(vm: AppViewModel, onOpen: (SeriesSummary) -> Unit) {
                 androidx.compose.material3.BadgedBox(badge = {
                     if (filters.activeCount > 0) androidx.compose.material3.Badge { Text("${filters.activeCount}") }
                 }) {
-                    IconButton(onClick = { sheet = true }) {
+                    IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) {
                         Icon(Icons.Outlined.FilterList, contentDescription = "Filtres")
                     }
                 }
                 // Albums hors ligne (remplace l'ancien onglet « Hors ligne »).
-                IconButton(onClick = { vm.subTab[Section.Library] = 1 }) {
+                IconButton(onClick = { vm.subTab[Section.Library] = 1 }, modifier = Modifier.size(38.dp)) {
                     Icon(Icons.Outlined.OfflinePin, contentDescription = "Albums hors ligne")
                 }
                 // Liste ↔ grille de couvertures.
-                IconButton(onClick = { vm.chooseLibraryGrid(!vm.libraryGrid) }) {
+                IconButton(onClick = { vm.chooseLibraryGrid(!vm.libraryGrid) }, modifier = Modifier.size(38.dp)) {
                     Icon(
                         if (vm.libraryGrid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
                         contentDescription = if (vm.libraryGrid) "Afficher en liste" else "Afficher en grille",
                     )
+                }
                 }
             }
             // Portée de la recherche (affichée dès qu'on tape) : nom de la série et/ou tags ; au moins une reste cochée.

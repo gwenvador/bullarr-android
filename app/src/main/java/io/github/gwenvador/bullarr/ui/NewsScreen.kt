@@ -1,6 +1,7 @@
 package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.graphics.SolidColor
 import io.github.gwenvador.bullarr.data.normalize
+import io.github.gwenvador.bullarr.data.newsGuessSeriesTitle
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -112,9 +114,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     // Entrée dont on choisit ou change la série (menu ⋮).
-    var pickFor by remember { mutableStateOf<NewsItem?>(null) }
+    var pickFor by remember { mutableStateOf<List<NewsItem>?>(null) }
+    // Appui long sur l'en-tête d'un groupe : actions de tous ses albums.
+    var groupMenu by remember { mutableStateOf<List<NewsItem>?>(null) }
     // Entrée dont on crée la série (dialogue d'ajout), puis rattachée à la nouvelle série.
-    var addingFor by remember { mutableStateOf<NewsItem?>(null) }
+    var addingFor by remember { mutableStateOf<List<NewsItem>?>(null) }
 
     // Mêmes réglages que la page web : premier lot des 100 entrées les plus récentes par source,
     // « Charger plus » récupère toute la fenêtre de 60 jours, puis « Charger une période plus
@@ -197,22 +201,32 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
         }
     }
     LaunchedEffect(api) { if (feeds.isEmpty()) loadAll(refresh = false) }
-    pickFor?.let { entry ->
-        NewsSeriesPicker(vm, entry, onDismiss = { pickFor = null }, onAddNew = {
-            addingFor = entry
+    // Un album, ou tous les albums d'un groupe (crayon de l'en-tête) : la série choisie s'applique à chacun.
+    suspend fun applySeries(entries: List<NewsItem>, seriesId: Int) {
+        val threads = mutableSetOf<String>()
+        entries.forEach { e ->
+            if (e.type == NewsType.EBDZ && !threads.add(e.raw.str("thread_id") ?: "")) return@forEach
+            setNewsSeries(api, e, seriesId)
+        }
+    }
+    groupMenu?.let { members -> NewsGroupActions(vm, members, onDismiss = { groupMenu = null }, onPickSeries = { pickFor = members }, onOpenSeries = onOpenSeries) }
+    fun attached(entries: List<NewsItem>) = if (entries.size > 1) " à ${entries.size} albums" else ""
+    pickFor?.let { entries ->
+        NewsSeriesPicker(vm, entries.first(), count = entries.size, onDismiss = { pickFor = null }, onAddNew = {
+            addingFor = entries
             pickFor = null
         }, onPick = { series ->
             pickFor = null
-            launchAction(scope, context, "Série « ${series.title} » rattachée", then = { scope.launch { loadAll(refresh = false) } }) {
-                setNewsSeries(api, entry, series.id)
+            launchAction(scope, context, "Série « ${series.title} » rattachée${attached(entries)}", then = { scope.launch { loadAll(refresh = false) } }) {
+                applySeries(entries, series.id)
             }
         })
     }
-    addingFor?.let { entry ->
-        SeriesAddDialog(vm, onDismiss = { addingFor = null }, initialQuery = entry.seriesTitle, onAdded = { sid, title ->
+    addingFor?.let { entries ->
+        SeriesAddDialog(vm, onDismiss = { addingFor = null }, initialQuery = entries.first().seriesTitle, onAdded = { sid, title ->
             addingFor = null
-            launchAction(scope, context, "Série « $title » créée et rattachée", then = { scope.launch { loadAll(refresh = false) } }) {
-                setNewsSeries(api, entry, sid)
+            launchAction(scope, context, "Série « $title » créée et rattachée${attached(entries)}", then = { scope.launch { loadAll(refresh = false) } }) {
+                applySeries(entries, sid)
             }
         })
     }
@@ -343,13 +357,13 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                     val first = members.first()
                     val genreOf = { it: NewsItem -> it.bedethequeUrl?.let { u -> genres[u] } }
                     if (members.size == 1) item(key = "${first.type}-$gi-${first.title.hashCode()}") {
-                        NewsRow(vm, first, showType = tab == 0, genre = genreOf(first), onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it })
+                        NewsRow(vm, first, showType = tab == 0, genre = genreOf(first), onActions = { groupMenu = listOf(it) })
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     } else {
                         val groupId = "${newsGroupKey(first)}|${first.date}"
                         val open = expandedGroups[groupId] == true
                         item(key = "g-$gi-$groupId") {
-                            NewsGroupRow(first, members.size, showType = tab == 0, genre = genreOf(first), expanded = open) {
+                            NewsGroupRow(first, members.size, showType = tab == 0, genre = genreOf(first), expanded = open, onPickSeries = { groupMenu = members }) {
                                 if (open) expandedGroups.remove(groupId) else expandedGroups[groupId] = true
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -360,7 +374,7 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                                 NewsRow(
                                     vm, m, showType = tab == 0 && m.type != first.type,
                                     genre = genreOf(m).takeIf { it != genreOf(first) },
-                                    onOpenSeries = onOpenSeries, onPickSeries = { pickFor = it },
+                                    onActions = { groupMenu = listOf(it) },
                                     hideDate = m.date == first.date, nested = true,
                                 )
                                 HorizontalDivider(Modifier.padding(start = 28.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -385,7 +399,7 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
 /** Choix ou changement de la série d'une entrée : toutes les bibliothèques, recherche par titre. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, onPick: (SeriesSummary) -> Unit, onAddNew: () -> Unit, onDismiss: () -> Unit) {
+private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, count: Int = 1, onPick: (SeriesSummary) -> Unit, onAddNew: () -> Unit, onDismiss: () -> Unit) {
     val api = vm.api
     var all by remember { mutableStateOf<List<SeriesSummary>?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
@@ -402,7 +416,10 @@ private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, onPick: (SeriesSu
     val terms = normalize(query).split(' ').filter { it.isNotBlank() }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(item.subtitle ?: item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (count > 1) {
+                Text(item.seriesTitle, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("La série choisie s'applique aux $count albums du groupe.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else Text(item.subtitle ?: item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             item.seriesId?.let {
                 Text("Rattachée actuellement à : ${item.seriesTitle}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -432,23 +449,23 @@ private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, onPick: (SeriesSu
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun NewsRow(
-    vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onOpenSeries: (Int, String) -> Unit, onPickSeries: (NewsItem) -> Unit,
+    vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onActions: (NewsItem) -> Unit,
     hideDate: Boolean = false, nested: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
     val uri = LocalUriHandler.current
-    val clipboard = LocalClipboardManager.current
     val dl = vm.downloads
-    var menu by remember { mutableStateOf(false) }
     val sentTo = item.files.firstNotNullOfOrNull { dl.sent[it.job.key] }
-    val copyable = item.files.firstOrNull()?.job?.let { j ->
-        when (j) { is DownloadJob.Ed2k -> j.link; is DownloadJob.Torrent -> j.url; is DownloadJob.Vk -> j.url; else -> null }
-    }
 
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = item.link != null) { item.link?.let { runCatching { uri.openUri(it) } } }
+        // Appui : ouvre la source ; appui long : actions de l'album (même fenêtre qu'un groupe).
+        Modifier.fillMaxWidth().combinedClickable(
+            onClick = { item.link?.let { runCatching { uri.openUri(it) } } },
+            onLongClick = { onActions(item) }, onLongClickLabel = "Actions de l'album",
+        )
             .padding(start = if (nested) 28.dp else 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -484,63 +501,6 @@ private fun NewsRow(
                 })
             }) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger") }
         }
-        Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, contentDescription = "Actions") }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (item.files.isNotEmpty() && !item.owned) {
-                    DropdownMenuItem(
-                        text = { Text(if (item.seriesId == null) "Ajouter la série et télécharger" else "Télécharger dans la série") },
-                        leadingIcon = { Icon(Icons.Outlined.Bolt, contentDescription = null) },
-                        onClick = { menu = false; dl.quick = item },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text(if (item.seriesId == null) "Choisir la série" else "Changer la série") },
-                    leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                    onClick = { menu = false; onPickSeries(item) },
-                )
-                item.seriesId?.let { id ->
-                    DropdownMenuItem(
-                        text = { Text("Ouvrir la série") },
-                        leadingIcon = { Icon(Icons.Outlined.CollectionsBookmark, contentDescription = null) },
-                        onClick = { menu = false; onOpenSeries(id, item.seriesTitle) },
-                    )
-                }
-                item.bedethequeUrl?.let { bd ->
-                    DropdownMenuItem(
-                        text = { Text("Ouvrir sur Bédéthèque") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) },
-                        onClick = { menu = false; runCatching { uri.openUri(bd) } },
-                    )
-                }
-                item.link?.let { link ->
-                    DropdownMenuItem(
-                        text = { Text("Ouvrir la source") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) },
-                        onClick = { menu = false; runCatching { uri.openUri(link) } },
-                    )
-                }
-                copyable?.let { link ->
-                    DropdownMenuItem(
-                        text = { Text("Copier le lien") },
-                        leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
-                        onClick = { menu = false; clipboard.setText(AnnotatedString(link)) },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("Chercher ailleurs") },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        vm.search.context = null
-                        vm.search.title = item.seriesTitle
-                        vm.search.volume = ""
-                        vm.search.search()
-                        vm.goToSearch()
-                    },
-                )
-            }
-        }
     }
 }
 
@@ -561,29 +521,59 @@ internal fun newsGroupKey(item: NewsItem): String? {
     item.bedethequeUrl?.takeIf { it.isNotBlank() }?.let { return "b:$it" }
     val r = item.raw
     fun str(k: String) = r.optString(k, "").takeIf { it.isNotBlank() && it != "null" }
-    val title = if (item.type == NewsType.EBDZ) str("matched_series_title") ?: str("bedetheque_title") ?: str("title")
-    else str("series_title") ?: str("bedetheque_title") ?: str("parsed_title")
+    // VK sans série reconnue : les fichiers d'un même sujet vont ensemble.
+    str("vk_topic")?.let { return "vk:" + normalize(it).trim() }
+    // Release RSS sans série : nom deviné avant le numéro de tome (« … T05 », « ….T06 »).
+    val title = if (item.type == NewsType.EBDZ) str("matched_series_title") ?: str("bedetheque_title") ?: newsGuessSeriesTitle(str("title")).ifEmpty { null } ?: str("title")
+    else str("series_title") ?: str("bedetheque_title") ?: str("parsed_title") ?: newsGuessSeriesTitle(str("title") ?: str("filename")).ifEmpty { null }
     return title?.let { normalize(it).trim() }?.takeIf { it.isNotEmpty() }?.let { "t:$it" }
 }
+
+/**
+ * Clés d'une entrée pour le regroupement : sa clé de série, plus ses noms compactés (sans
+ * espaces, ponctuation ni parenthèses) pour qu'un album rattaché à sa fiche (« Dragon Ball
+ * (Perfect Edition) ») rejoigne les releases voisines au nom seulement deviné (« Dragonball
+ * Perfect Edition T05 »).
+ */
+internal fun newsGroupKeys(item: NewsItem): Set<String> {
+    val r = item.raw
+    fun str(k: String) = r.optString(k, "").takeIf { it.isNotBlank() && it != "null" }
+    val names = listOfNotNull(
+        item.seriesTitle,
+        newsGuessSeriesTitle(str("title") ?: str("filename") ?: item.title).ifEmpty { null },
+    )
+    return buildSet {
+        newsGroupKey(item)?.let { add(it) }
+        names.map { compactSeriesName(it) }.filter { it.length >= 4 }.forEach { add("n:$it") }
+    }
+}
+
+internal fun compactSeriesName(name: String): String = normalize(name).filter { it.isLetterOrDigit() }
 
 /** Regroupe les entrées CONSÉCUTIVES d'une même série ; un album d'une autre série coupe le groupe. */
 internal fun groupConsecutiveSeries(items: List<NewsItem>): List<List<NewsItem>> {
     val out = mutableListOf<MutableList<NewsItem>>()
-    var lastKey: String? = null
+    var groupKeys: MutableSet<String> = mutableSetOf()
     for (it in items) {
-        val k = newsGroupKey(it)
-        if (k != null && k == lastKey) out.last().add(it) else out.add(mutableListOf(it))
-        lastKey = k
+        val keys = newsGroupKeys(it)
+        if (out.isNotEmpty() && keys.any { k -> k in groupKeys }) {
+            out.last().add(it); groupKeys.addAll(keys)
+        } else {
+            out.add(mutableListOf(it)); groupKeys = keys.toMutableSet()
+        }
     }
     return out
 }
 
 /** Ligne « série » d'un groupe replié : nom, nombre d'albums, date / type / origine du plus récent. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: String?, expanded: Boolean, onToggle: () -> Unit) {
+private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: String?, expanded: Boolean, onPickSeries: () -> Unit, onToggle: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+        // Appui : déplier ; appui long : actions du groupe (tout importer, série, fiche…).
+        Modifier.fillMaxWidth().combinedClickable(onClick = onToggle, onLongClick = onPickSeries, onLongClickLabel = "Actions des $count albums")
+            .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -644,4 +634,69 @@ internal fun shortNewsDate(d: String): String {
         else -> date.format(java.time.format.DateTimeFormatter.ofPattern(if (date.year == today.year) "d MMM" else "d MMM yyyy", java.util.Locale.FRENCH))
     }
     return listOfNotNull(day, time.ifBlank { null }).joinToString(" ")
+}
+
+/** Actions d'un groupe d'albums (appui long sur son en-tête), comme l'en-tête de groupe du site. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NewsGroupActions(vm: AppViewModel, members: List<NewsItem>, onDismiss: () -> Unit, onPickSeries: () -> Unit, onOpenSeries: (Int, String) -> Unit) {
+    val uri = LocalUriHandler.current
+    val dl = vm.downloads
+    val first = members.first()
+    val seriesId = members.firstNotNullOfOrNull { it.seriesId }
+    val bd = members.firstNotNullOfOrNull { it.bedethequeUrl?.takeIf { u -> u.isNotBlank() } }
+    val withFiles = members.filter { it.files.isNotEmpty() }
+    val single = members.singleOrNull()
+    val clipboard = LocalClipboardManager.current
+    val copyable = single?.files?.firstOrNull()?.job?.let { j ->
+        when (j) { is DownloadJob.Ed2k -> j.link; is DownloadJob.Torrent -> j.url; is DownloadJob.Vk -> j.url; else -> null }
+    }
+    @Composable
+    fun Entry(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, detail: String? = null, enabled: Boolean = true, action: () -> Unit) {
+        val cs = MaterialTheme.colorScheme
+        // Grisée : l'action reste visible, la raison est écrite en dessous.
+        ListItem(
+            headlineContent = { Text(label, color = if (enabled) androidx.compose.ui.graphics.Color.Unspecified else cs.onSurface.copy(alpha = 0.38f)) },
+            supportingContent = detail?.let { { Text(it, style = MaterialTheme.typography.bodySmall, color = if (enabled) cs.onSurfaceVariant else cs.onSurfaceVariant.copy(alpha = 0.7f)) } },
+            leadingContent = { Icon(icon, contentDescription = null, tint = if (enabled) cs.onSurfaceVariant else cs.onSurfaceVariant.copy(alpha = 0.38f)) },
+            modifier = Modifier.clickable(enabled = enabled) { onDismiss(); action() },
+        )
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            Text(first.seriesTitle, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+            Text(single?.title ?: "${members.size} albums", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 8.dp))
+            // Éclair de l'en-tête du site : ajoute la série si besoin et télécharge ses tomes manquants.
+            val missing = withFiles.filter { !it.owned }
+            val why = when {
+                missing.isNotEmpty() -> null
+                withFiles.isEmpty() -> "Aucun fichier téléchargeable dans ces albums : seulement un lien vers la source"
+                else -> "Tous les albums du groupe sont déjà possédés (« Choisir les fichiers » permet de les remplacer)"
+            }
+            if (single != null) Entry(Icons.Outlined.Bolt, if (seriesId == null) "Ajouter la série et télécharger" else "Télécharger dans la série",
+                why?.replace("Tous les albums du groupe sont déjà possédés", "Album déjà possédé")?.replace("ces albums", "cet album"),
+                enabled = why == null) { dl.quick = single }
+            else Entry(Icons.Outlined.Bolt, if (seriesId == null) "Ajouter la série et tout importer" else "Tout importer",
+                why ?: "${missing.size} album(s) non possédé(s) envoyé(s) au téléchargement", enabled = why == null) { dl.quickAll = missing }
+            if (withFiles.isNotEmpty()) Entry(Icons.Outlined.Download, if (single != null) "Télécharger" else "Choisir les fichiers à télécharger") {
+                dl.choose(single?.let { it.subtitle ?: it.title } ?: first.seriesTitle, withFiles.flatMap { m ->
+                    m.files.map { f -> f.job to listOfNotNull(f.volumeLabel ?: m.title, if (f.owned) "Possédé : sera remplacé" else null).joinToString(" · ").ifBlank { null } }
+                })
+            }
+            Entry(Icons.Outlined.Edit, if (seriesId == null) "Choisir la série" else "Changer la série", if (members.size > 1) "S'applique aux ${members.size} albums" else null, action = onPickSeries)
+            seriesId?.let { id -> Entry(Icons.Outlined.CollectionsBookmark, "Ouvrir la série") { onOpenSeries(id, first.seriesTitle) } }
+            bd?.let { url -> Entry(Icons.AutoMirrored.Outlined.OpenInNew, "Fiche Bédéthèque") { runCatching { uri.openUri(url) } } }
+            single?.link?.let { link -> Entry(Icons.AutoMirrored.Outlined.OpenInNew, "Ouvrir la source") { runCatching { uri.openUri(link) } } }
+            copyable?.let { link -> Entry(Icons.Outlined.ContentCopy, "Copier le lien") { clipboard.setText(AnnotatedString(link)) } }
+            Entry(Icons.Outlined.Search, "Chercher ailleurs") {
+                vm.search.context = null
+                vm.search.title = first.seriesTitle
+                vm.search.volume = ""
+                vm.search.search()
+                vm.goToSearch()
+            }
+        }
+    }
 }

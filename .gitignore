@@ -14,3 +14,7 @@ captures/
 *.apk
 *.aab
 dist/
+
+# ncnn précompilé (scripts/fetch-ncnn.sh)
+app/src/main/cpp/ncnn/
+app/.cxx/

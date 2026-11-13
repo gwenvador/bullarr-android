@@ -36,6 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import io.github.gwenvador.bullarr.data.UpdateState
 import io.github.gwenvador.bullarr.data.formatBytes
 
@@ -96,6 +99,7 @@ fun AboutScreen(vm: AppViewModel) {
             }
         }
         UpdateCard(vm)
+        MihonCard(vm)
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors()) {
             Column(Modifier.padding(vertical = 8.dp)) {
                 Text("Liens", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -115,6 +119,69 @@ fun AboutScreen(vm: AppViewModel) {
                     )
                 }
             }
+        }
+    }
+}
+
+/** Extension Mihon / Tachiyomi servie par le serveur Bullarr, et clé API personnelle à y saisir. */
+@Composable
+fun MihonCard(vm: AppViewModel) {
+    val cs = MaterialTheme.colorScheme
+    val uri = LocalUriHandler.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val server = vm.settings.serverUrl.trim().trimEnd('/')
+    val sessionLogin = vm.settings.authMode != "key"
+    var busy by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var message by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+
+    fun copy(label: String, text: String, sensitive: Boolean) {
+        val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+        val clip = android.content.ClipData.newPlainText(label, text)
+        if (sensitive) clip.description.extras = android.os.PersistableBundle().apply {
+            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+        cm.setPrimaryClip(clip)
+    }
+
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Extension Mihon / Tachiyomi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Pour lire votre bibliothèque Bullarr dans Mihon. Après l'installation : Sources → Bullarr → réglages, " +
+                    "puis saisissez l'adresse du serveur et votre clé API personnelle (ou un identifiant et un mot de passe).",
+                style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+            )
+            Button(onClick = { runCatching { uri.openUri("$server/static/extensions/bullarr-mihon.apk") } }, enabled = server.isNotBlank()) {
+                Text("Télécharger l'extension")
+            }
+            Text("Ouvrez le fichier téléchargé pour l'installer.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { copy("Adresse Bullarr", server, false); message = "Adresse copiée" }, enabled = server.isNotBlank()) {
+                    Text("Copier l'adresse")
+                }
+                if (sessionLogin) OutlinedButton(enabled = !busy, onClick = {
+                    busy = true; message = null
+                    scope.launch {
+                        message = try {
+                            val api = vm.api ?: throw IllegalStateException("Non connecté")
+                            var key = api.getObject("/api/auth/profile/api-key").optString("api_key")
+                            if (key.isBlank()) key = api.postObject("/api/auth/profile/api-key", org.json.JSONObject()).optString("api_key")
+                            if (key.isBlank()) "Le serveur n'a pas renvoyé de clé"
+                            else { copy("Clé API Bullarr", key, true); "Clé API copiée" }
+                        } catch (e: Exception) {
+                            "Clé indisponible : ${e.message ?: "erreur"}"
+                        } finally { busy = false }
+                    }
+                }) {
+                    if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Text("Copier ma clé API")
+                }
+            }
+            if (!sessionLogin) Text(
+                "Vous êtes connecté par clé API : réutilisez-la, ou créez une clé personnelle sur le site (Mon profil → Clé API).",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+            )
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.primary) }
         }
     }
 }

@@ -206,7 +206,8 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                 Section.Actions -> when (sub) {
                                     0 -> EnrichScreen(vm, snackbar, openSeries)
                                     1 -> MonitorScreen(vm, snackbar, openSeries)
-                                    else -> VerificationScreen(vm, snackbar, openSeries)
+                                    2 -> VerificationScreen(vm, snackbar, openSeries)
+                                    else -> io.github.gwenvador.bullarr.ui.UpscalingScreen(vm, snackbar, openSeries)
                                 }
                                 // Routage par nom : la liste des onglets dépend du rôle (voir AppViewModel.subsOf).
                                 Section.Config -> when (subs.getOrNull(sub) ?: subs.last()) {
@@ -218,6 +219,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     "Recherche" -> ConfigScreen(vm, snackbar, SEARCH)
                                     "Surveillance" -> ConfigScreen(vm, snackbar, MONITOR)
                                     "Apparence" -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
+                                    "Upscaling" -> io.github.gwenvador.bullarr.ui.ReaderSettingsScreen(vm)
                                     "Accès" -> ConfigScreen(vm, snackbar, ACCESS, header = { LoginScreen(vm, firstRun = false, onSaved = {}, embedded = true) })
                                     "Utilisateurs" -> io.github.gwenvador.bullarr.ui.UsersScreen(vm)
                                     "IA" -> io.github.gwenvador.bullarr.ui.AiSettingsScreen(vm, snackbar)

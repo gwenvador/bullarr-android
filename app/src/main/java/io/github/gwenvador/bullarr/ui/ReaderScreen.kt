@@ -10,6 +10,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -44,6 +46,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.FitScreen
+import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.AutoFixOff
 import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionLToR
 import androidx.compose.material.icons.automirrored.outlined.FormatTextdirectionRToL
 import androidx.compose.material.icons.outlined.SwapVert
@@ -76,6 +80,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -99,6 +104,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import io.github.gwenvador.bullarr.data.BullarrApi
 import io.github.gwenvador.bullarr.data.OfflineStore
 import io.github.gwenvador.bullarr.data.PageCache
+import io.github.gwenvador.bullarr.data.Upscaler
 import io.github.gwenvador.bullarr.data.ReaderMeta
 import io.github.gwenvador.bullarr.data.ReadingProgress
 import io.github.gwenvador.bullarr.data.parseReaderMeta
@@ -235,6 +241,7 @@ private fun Reader(
         else -> progress.get(meta.volumeId) ?: 0
     }.coerceIn(0, total - 1)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var bars by remember { mutableStateOf(true) }
     var barsTick by remember { mutableIntStateOf(0) }
     var zoomed by remember { mutableStateOf(false) }
@@ -244,6 +251,11 @@ private fun Reader(
     // Sens manga (droite → gauche) : par série, activé d'office pour une série d'origine Asie.
     var rtl by remember { mutableStateOf(progress.rtl(meta.seriesId, manga)) }
     var doublePref by remember { mutableStateOf(progress.doublePage) }
+    LaunchedEffect(Unit) { Upscaler.load(context); Upscaler.syncThreshold(context, api) }
+    // Échec du chargement (pas de Vulkan, modèle illisible…) : on le dit, la lecture continue avec les pages d'origine.
+    LaunchedEffect(Upscaler.unavailable) {
+        Upscaler.unavailable?.let { if (Upscaler.enabled) android.widget.Toast.makeText(context, "Upscaling indisponible sur cet appareil : $it", android.widget.Toast.LENGTH_LONG).show() }
+    }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val double = landscape && doublePref && !webtoon
     val spreads = remember(total, double) { spreadsOf(total, double) }
@@ -287,9 +299,14 @@ private fun Reader(
         }
     }
     // Précharge d'abord la page courante, puis les suivantes (et la précédente pour revenir).
-    LaunchedEffect(current) {
+    LaunchedEffect(current, Upscaler.enabled, Upscaler.model) {
         for (i in listOf(current, current + 1, current + 2, current + 3, current - 1)) {
             if (i in 0 until total) launch { runCatching { PageCache.get(api, meta.volumeId, i + 1, offline) } }
+        }
+        // Amélioration préparée d'avance pour la page courante et les deux suivantes (une à la fois).
+        if (Upscaler.enabled) for (i in listOf(current, current + 1, current + 2)) {
+            if (i in 0 until total) runCatching { PageCache.enhance(context, api, meta.volumeId, i + 1, offline) }
+                .onFailure { if (it is CancellationException) throw it }
         }
     }
 
@@ -406,6 +423,80 @@ private fun Reader(
                         modifier = Modifier.alpha(if (doublePref) 1f else 0.45f),
                     )
                 }
+                // Upscaling des pages basse définition (IA sur le processeur graphique) : pastille colorée quand elle est active,
+                // menu pour la couper ou choisir le modèle.
+                Box {
+                    var upMenu by remember { mutableStateOf(false) }
+                    // Page déjà en haute définition : icône désactivée (grisée), un appui en donne la raison.
+                    val hd = PageCache.tooLargeSize(meta.volumeId, current + 1)
+                        ?: PageCache.cached(meta.volumeId, current + 1)?.takeIf { !Upscaler.eligible(it) }?.let { "${it.width}×${it.height}" }
+                    val active = Upscaler.enabled && hd == null
+                    IconButton(
+                        onClick = {
+                            barsTick++
+                            if (hd != null) android.widget.Toast.makeText(
+                                context, "Upscaling désactivé : cette page fait déjà $hd px (au-delà de ${Upscaler.maxSourceSide} px, elle est assez fine)",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                            else upMenu = true
+                        },
+                        modifier = if (active) Modifier.padding(4.dp).background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape) else Modifier,
+                    ) {
+                        Icon(
+                            if (active) Icons.Outlined.AutoFixHigh else Icons.Outlined.AutoFixOff,
+                            contentDescription = when {
+                                hd != null -> "Upscaling désactivé : page en haute définition"
+                                active -> "Upscaling : ${Upscaler.model.label.lowercase()}"
+                                else -> "Upscaling : désactivé"
+                            },
+                            tint = when {
+                                hd != null -> Color.White.copy(alpha = 0.25f)
+                                active -> MaterialTheme.colorScheme.onPrimary
+                                else -> Color.White.copy(alpha = 0.6f)
+                            },
+                        )
+                    }
+                    androidx.compose.material3.DropdownMenu(expanded = upMenu, onDismissRequest = { upMenu = false }) {
+                        Text(
+                            "Upscaling des pages basse définition", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        PageCache.tooLargeSize(meta.volumeId, current + 1)?.takeIf { Upscaler.enabled }?.let {
+                            Text(
+                                "Inactif sur cette page : elle fait déjà $it px (l'upscaling ne concerne que les pages de ${Upscaler.maxSourceSide} px au plus).",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp).width(260.dp),
+                            )
+                        }
+                        fun pick(model: io.github.gwenvador.bullarr.data.UpscaleModel?) {
+                            upMenu = false; barsTick++
+                            if (model == null) { Upscaler.stop(context); return }
+                            Upscaler.setModel(context, model); Upscaler.setEnabled(context, true)
+                            Upscaler.unavailable?.let {
+                                android.widget.Toast.makeText(context, "Upscaling indisponible sur cet appareil : $it", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        val check: @Composable (Boolean) -> Unit = { on ->
+                            if (on) Icon(Icons.Outlined.TaskAlt, contentDescription = "Choisi", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Désactivé") }, onClick = { pick(null) },
+                            leadingIcon = { Icon(Icons.Outlined.AutoFixOff, contentDescription = null) },
+                            trailingIcon = { check(!Upscaler.enabled) },
+                        )
+                        io.github.gwenvador.bullarr.data.UpscaleModel.entries.filter { Upscaler.isInstalled(it) }.forEach { m ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(m.label) }, onClick = { pick(m) },
+                                leadingIcon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null) },
+                                trailingIcon = { check(Upscaler.enabled && Upscaler.model == m) },
+                            )
+                        }
+                        Text(
+                            "Autres modèles à télécharger : Réglages → Upscaling", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
                 // Pages ↔ webtoon (lecture en défilement vertical continu) : libellé explicite, c'est le mode qu'on va prendre.
                 TextButton(
                     onClick = { webtoon = !webtoon; progress.webtoon = webtoon; zoomed = false; barsTick++ },
@@ -424,6 +515,54 @@ private fun Reader(
                         contentDescription = if (fitWidth) "Page entière" else "Pleine largeur", tint = Color.White,
                     )
                 }
+            }
+        }
+
+        // Indicateur d'amélioration de la page affichée : en cours (avec le temps attendu), puis « améliorée » un instant.
+        val enhancing = Upscaler.enabled && PageCache.isEnhancing(meta.volumeId, current + 1)
+        var justDone by remember { mutableStateOf(false) }
+        LaunchedEffect(enhancing) {
+            if (!enhancing && PageCache.cachedEnhanced(meta.volumeId, current + 1) != null) { justDone = true; delay(1800); justDone = false }
+        }
+        LaunchedEffect(current) { justDone = false }
+        // Page trop grande : pas d'upscaling, on le dit (une fois par album, la raison reste dans le menu de la baguette).
+        val tooLarge = if (Upscaler.enabled) PageCache.tooLargeSize(meta.volumeId, current + 1) else null
+        var hdNotice by remember { mutableStateOf(false) }
+        var hdShown by remember(meta.volumeId) { mutableStateOf(false) }
+        LaunchedEffect(tooLarge) {
+            if (tooLarge != null && !hdShown) { hdShown = true; hdNotice = true; delay(3500); hdNotice = false }
+        }
+        LaunchedEffect(current) { if (tooLarge == null) hdNotice = false }
+        AnimatedVisibility(
+            enhancing || justDone || (hdNotice && tooLarge != null),
+            Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.statusBars).padding(top = if (bars) 60.dp else 8.dp, end = 8.dp),
+            enter = fadeIn(), exit = fadeOut(),
+        ) {
+            Row(
+                Modifier.background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (enhancing) androidx.compose.material3.CircularProgressIndicator(Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+                else Icon(
+                    if (justDone) Icons.Outlined.AutoFixHigh else Icons.Outlined.AutoFixOff, contentDescription = null,
+                    tint = if (justDone) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    when {
+                        enhancing -> "Upscaling…"
+                        justDone -> "Upscaling terminé"
+                        else -> "Pas d'upscaling : page déjà en haute définition ($tooLarge px)"
+                    },
+                    color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 8.dp),
+                )
+                // Arrêter : coupe l'option et interrompt le calcul en cours ; les pages d'origine restent affichées.
+                if (enhancing) Text(
+                    "Arrêter", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = 12.dp).clip(RoundedCornerShape(50)).clickable {
+                        Upscaler.stop(context)
+                        android.widget.Toast.makeText(context, "Upscaling coupé", android.widget.Toast.LENGTH_SHORT).show()
+                    }.padding(horizontal = 4.dp, vertical = 2.dp),
+                )
             }
         }
 
@@ -558,7 +697,18 @@ private fun rememberPage(api: BullarrApi, offline: OfflineStore, volumeId: Int, 
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = "Page $page : ${e.readable()}" }
     }
-    return PageLoad(bitmap, error) { attempt++ }
+    // Page améliorée : l'original s'affiche tout de suite, la version nette le remplace quand elle est prête.
+    val context = LocalContext.current
+    val upscale = Upscaler.enabled
+    val model = Upscaler.model
+    var better by remember(volumeId, page, upscale, model) { mutableStateOf(if (upscale) PageCache.cachedEnhanced(volumeId, page) else null) }
+    LaunchedEffect(volumeId, page, upscale, model, bitmap != null) {
+        if (!upscale || bitmap == null || better != null) return@LaunchedEffect
+        better = try { PageCache.enhance(context, api, volumeId, page, offline) }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { null }
+    }
+    return PageLoad(better ?: bitmap, error) { attempt++ }
 }
 
 @Composable

@@ -194,7 +194,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Sous-onglets d'une rubrique selon le rôle (les réglages du serveur sont réservés aux administrateurs). */
     fun subsOf(s: Section): List<String> =
-        if (s == Section.Config && isReader) listOf("Profil", "Intégrations", "Apparence", "À propos") else s.subs
+        if (s == Section.Config && isReader) listOf("Profil", "Intégrations", "Apparence", "Upscaling", "À propos") else s.subs
 
     /** Demandes de BD et de comptes à valider (administrateurs). */
     var requestCount by androidx.compose.runtime.mutableIntStateOf(0)

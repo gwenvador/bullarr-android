@@ -84,7 +84,7 @@ fun parseRss(o: JSONObject): Pair<List<NewsItem>, List<String>> {
             downloaded = e.bool("downloaded") == true,
             link = link,
             seriesId = seriesId,
-            seriesTitle = e.str("series_title") ?: e.str("bedetheque_title") ?: title,
+            seriesTitle = e.str("series_title") ?: e.str("bedetheque_title") ?: e.str("parsed_title") ?: newsGuessSeriesTitle(title).ifEmpty { null } ?: title,
             rawHint = title,
             bedethequeUrl = e.str("bedetheque_url"),
             files = files,
@@ -126,7 +126,7 @@ fun parseTelegram(o: JSONObject): List<NewsItem> = o.optJSONArray("files").objec
         downloaded = f.bool("downloaded") == true,
         link = post,
         seriesId = seriesId,
-        seriesTitle = f.str("series_title") ?: f.str("bedetheque_title") ?: f.str("parsed_title") ?: filename,
+        seriesTitle = f.str("series_title") ?: f.str("bedetheque_title") ?: f.str("parsed_title") ?: newsGuessSeriesTitle(filename).ifEmpty { null } ?: filename,
         rawHint = filename,
         bedethequeUrl = f.str("bedetheque_url"),
         files = if (channel != null && messageId != null)
@@ -184,7 +184,7 @@ fun parseEbdz(o: JSONObject): List<NewsItem> = o.optJSONArray("sessions").object
             downloaded = false,
             link = r.str("url"),
             seriesId = seriesId,
-            seriesTitle = r.str("matched_series_title") ?: r.str("bedetheque_title") ?: title,
+            seriesTitle = r.str("matched_series_title") ?: r.str("bedetheque_title") ?: newsGuessSeriesTitle(title).ifEmpty { null } ?: title,
             rawHint = files.firstOrNull()?.job?.name ?: title,
             bedethequeUrl = r.str("matched_bedetheque_url") ?: r.str("bedetheque_url"),
             files = files,
@@ -192,4 +192,26 @@ fun parseEbdz(o: JSONObject): List<NewsItem> = o.optJSONArray("sessions").object
             raw = r,
         )
     }
+}
+
+private val NEWS_EXT = Regex("^(.*?)\\.(cbz|cbr|cb7|cbt|pdf|epub|zip|rar|7z)$", RegexOption.IGNORE_CASE)
+private val NEWS_RELEASE_TAG = Regex("\\s*[\\[(](cbz|cbr|cb7|pdf|epub)[\\])]\\s*(?:-\\s*[\\w.-]+)?\\s*$", RegexOption.IGNORE_CASE)
+private val NEWS_TOME = Regex("^(.*?)(?:^|[\\s._\\-(\\[])(?:T|Tome|Vol(?:ume)?\\.?)\\s*\\.?\\s*\\d{1,3}(?!\\d)", RegexOption.IGNORE_CASE)
+
+/** Nom lisible d'une release (comme _nouveautesPrettyName du site) : sans extension ni « [CBZ]-Groupe », points et _ en espaces. */
+fun newsPrettyName(raw: String): String {
+    var base = NEWS_EXT.find(raw)?.groupValues?.get(1) ?: raw
+    NEWS_RELEASE_TAG.find(base)?.takeIf { it.range.first > 0 }?.let { base = base.substring(0, it.range.first) }
+    if ((base.contains('.') || base.contains('_')) && base.count { it == ' ' } < 3) {
+        base = base.replace('_', ' ').replace(Regex("(?<!\\d)\\.|\\.(?!\\d)"), " ")
+    }
+    return base.replace(Regex("\\s+"), " ").trim().ifEmpty { raw }
+}
+
+/** Série devinée d'une release sans série reconnue : ce qui précède « T05 », « Tome 5 », « Vol. 5 » (« » si rien). */
+fun newsGuessSeriesTitle(raw: String?): String {
+    if (raw.isNullOrBlank()) return ""
+    val m = NEWS_TOME.find(newsPrettyName(raw)) ?: return ""
+    val name = m.groupValues[1].replace(Regex("[\\s._\\-(\\[]+$"), "").trim()
+    return if (name.length >= 2) name else ""
 }

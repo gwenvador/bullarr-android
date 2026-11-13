@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
 /**
@@ -109,7 +110,70 @@ object PageCache {
         }
     }
 
+    // Pages améliorées (Upscaler) : cache à part, l'original reste affiché en attendant.
+    private val enhanced = object : LruCache<String, Bitmap>(128 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
+    }
+    /** Pages que le modèle n'agrandit pas (déjà fines) : inutile de recommencer. */
+    private val skipEnhance = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val enhanceLock = kotlinx.coroutines.sync.Mutex()
+    /** Pages en attente ou en cours d'amélioration (clé volume:page → nombre de demandes), pour l'indicateur du lecteur. */
+    private val pending = androidx.compose.runtime.mutableStateMapOf<String, Int>()
+    /** Pages trop grandes pour l'upscaling (clé volume:page → « largeur×hauteur »), pour en donner la raison dans le lecteur. */
+    private val tooLarge = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+    /** Taille de la page si elle est trop grande pour l'upscaling (état observable), sinon null. */
+    fun tooLargeSize(volumeId: Int, page: Int): String? = tooLarge["$volumeId:$page"]
+
+    private fun enhancedKey(volumeId: Int, page: Int, m: UpscaleModel = Upscaler.model) = "${m.id}:$volumeId:$page"
+
+    fun cachedEnhanced(volumeId: Int, page: Int): Bitmap? = enhanced.get(enhancedKey(volumeId, page))
+
+    /** Vrai tant que la page attend ou subit l'amélioration (état observable). */
+    fun isEnhancing(volumeId: Int, page: Int) = (pending["$volumeId:$page"] ?: 0) > 0
+
+    /**
+     * Version améliorée d'une page basse définition, calculée une seule fois (une page à la fois, dans l'ordre).
+     * Null si l'option est coupée, la page déjà fine ou l'appareil incapable.
+     */
+    suspend fun enhance(context: android.content.Context, api: BullarrApi, volumeId: Int, page: Int, offline: OfflineStore? = null): Bitmap? {
+        if (!Upscaler.enabled) return null
+        val m = Upscaler.model
+        val key = enhancedKey(volumeId, page, m)
+        enhanced.get(key)?.let { return it }
+        if ("$volumeId:$page" in skipEnhance) return null
+        val base = get(api, volumeId, page, offline)
+        if (!Upscaler.eligible(base)) {
+            skipEnhance += "$volumeId:$page"
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { tooLarge["$volumeId:$page"] = "${base.width}×${base.height}" }
+            return null
+        }
+        val p = "$volumeId:$page"
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { pending[p] = (pending[p] ?: 0) + 1 }
+        try {
+            // Une page à la fois, dans l'ordre des demandes ; une demande en attente a pu être servie entre-temps.
+            return enhanceLock.withLock {
+                enhanced.get(key) ?: Upscaler.upscale(context, base, m)?.also { enhanced.put(key, it) }
+            }
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.Main) {
+                val n = (pending[p] ?: 1) - 1
+                if (n <= 0) pending.remove(p) else pending[p] = n
+            }
+        }
+    }
+
+    /** Seuil de basse définition changé : les pages écartées sont réexaminées. */
+    fun resetUpscaleDecisions() {
+        skipEnhance.clear()
+        android.os.Handler(android.os.Looper.getMainLooper()).post { tooLarge.clear() }
+    }
+
     fun clear() {
+        enhanced.evictAll()
+        skipEnhance.clear()
+        tooLarge.clear()
+        pending.clear()
         thumbs.evictAll()
         synchronized(inflight) { inflight.values.forEach { it.cancel() }; inflight.clear() }
         cache.evictAll()

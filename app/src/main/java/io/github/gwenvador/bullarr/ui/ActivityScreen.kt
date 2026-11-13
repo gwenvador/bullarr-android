@@ -160,17 +160,23 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var adding by remember { mutableStateOf(false) }
     var assignVolume by remember { mutableStateOf<Int?>(null) }
     var addingFor by remember { mutableStateOf<List<Int>>(emptyList()) }
-    fun assign(seriesId: Int, volume: Int?, only: List<Int>? = null) {
+    fun assign(seriesId: Int, target: VolumeTarget?, only: List<Int>? = null, importNow: Boolean = false) {
         val ids = only ?: selected.mapNotNull { trackers[it] }
         selected = emptyList()
         scope.launch {
             var failed: String? = null
             ids.forEach { tid ->
                 try {
-                    api.postObject("api/activity/update-tracking", JSONObject().put("tracking_id", tid).put("series_id", seriesId).apply { if (volume != null) put("volume_number", volume) })
+                    api.postObject("api/activity/update-tracking", JSONObject().put("tracking_id", tid).put("series_id", seriesId).also { target?.putInto(it) })
                 } catch (e: Exception) { failed = e.readable() }
             }
-            snackbar.showSnackbar(failed ?: "${ids.size} téléchargement(s) assigné(s)")
+            if (importNow && failed == null) {
+                // Assigné puis importé tout de suite (comme « Importer » sur la sélection).
+                importing = true
+                val message = try { manualImport(api, ids.toSet(), target) } catch (e: Exception) { e.readable() }
+                importing = false
+                snackbar.showSnackbar(message, duration = androidx.compose.material3.SnackbarDuration.Long)
+            } else snackbar.showSnackbar(failed ?: "${ids.size} téléchargement(s) assigné(s)")
             refresh()
         }
     }
@@ -219,7 +225,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Annuler") } },
     )
-    if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { addingFor = selected.mapNotNull { trackers[it] }; adding = true }, onPick = { sid, vol -> assign(sid, vol) })
+    if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { addingFor = selected.mapNotNull { trackers[it] }; adding = true }, onPick = { sid, vol, now -> assign(sid, vol, importNow = now) })
     if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName(selected.firstOrNull()?.let { names[it] }), onAdded = { sid, _ -> assign(sid, null, addingFor) })
     if (confirmBatch) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmBatch = false },
@@ -524,6 +530,8 @@ private fun guessSeriesName(raw: String?): String {
     if (raw.isNullOrBlank()) return ""
     var t = raw.replace(Regex("\\[[^]]*]|\\([^)]*\\)"), " ").replace(Regex("-[A-Za-z0-9]+$"), "")
     t = t.replace('.', ' ').replace('_', ' ')
+    // « Série - Titre de l'album - Intégral » : la série est la première partie.
+    t = t.substringBefore(" - ")
     val noise = setOf("fr", "french", "notag", "cbz", "cbr", "pdf", "scan", "comics", "bd", "ebook", "hd", "jpg")
     return t.split(Regex("\\s+")).filter { it.isNotBlank() && it.lowercase() !in noise }.joinToString(" ").trim()
 }
@@ -533,7 +541,7 @@ private fun guessSeriesName(raw: String?): String {
  * en vrac sont convertis en CBZ, puis les fichiers prêts sont importés (POST /api/import/execute).
  * Renvoie un résumé lisible, avec le détail de chaque échec.
  */
-private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrApi, trackingIds: Set<Int>): String {
+private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrApi, trackingIds: Set<Int>, target: VolumeTarget? = null): String {
     fun JSONObject.dest() = optJSONObject("destination")
     var state = api.getObject("api/import/state")
     val notes = mutableListOf<String>()
@@ -547,6 +555,17 @@ private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrAp
     if (folders.isNotEmpty()) state = api.getObject("api/import/state")
     val files = state.optJSONArray("files").objects().filter { (it.dest()?.int("tracking_id") ?: -1) in trackingIds }
     val ready = files.filter { it.dest()?.int("series_id") != null }
+    // Tome choisi à la main (ex. intégrale sans numéro dans le nom) : écrit dans « parsed », comme la page /import du web.
+    if (target != null) ready.forEach { f ->
+        val n = target.number ?: JSONObject.NULL
+        val p = f.optJSONObject("parsed") ?: JSONObject().also { f.put("parsed", it) }
+        p.put("volume", if (target.kind == VolumeKind.Tome) n else JSONObject.NULL)
+            .put("is_integral", target.kind == VolumeKind.Integral).put("integral_number", if (target.kind == VolumeKind.Integral) n else JSONObject.NULL)
+            .put("is_hs", target.kind == VolumeKind.Hs).put("hs_number", if (target.kind == VolumeKind.Hs) n else JSONObject.NULL)
+            .put("is_episode", target.kind == VolumeKind.Episode).put("episode_number", if (target.kind == VolumeKind.Episode) n else JSONObject.NULL)
+            .put("is_special", false).put("special_label", JSONObject.NULL).put("tracked_volume_conflict", JSONObject.NULL)
+        f.put("manual_override", true)
+    }
     val unassigned = files.size - ready.size
     if (unassigned > 0) notes += "$unassigned fichier(s) sans série assignée (utilisez « Assigner la série » d'abord)"
     if (ready.isEmpty()) {

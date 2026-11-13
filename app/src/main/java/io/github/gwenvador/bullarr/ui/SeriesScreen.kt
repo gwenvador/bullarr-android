@@ -5,6 +5,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloseFullscreen
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import kotlinx.coroutines.launch
 import io.github.gwenvador.bullarr.data.normalize
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -190,6 +195,20 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         vm.updateSeriesRow(summary.id) { row -> row.copy(tags = tags) }
     }
     var refreshing by remember { mutableStateOf(false) }
+    // Upscaling / réduction sur le serveur (menus du tome et de la série, comme les molettes du site).
+    var upscaleLimits by remember { mutableStateOf(UpscaleLimits()) }
+    LaunchedEffect(api) { upscaleLimits = UpscaleLimits.load(api) }
+    var upscaleAsk by remember { mutableStateOf<List<VolumeRow>?>(null) }
+    var downscaleAsk by remember { mutableStateOf<List<VolumeRow>?>(null) }
+    fun runUpscale(ok: String, block: suspend () -> Unit) = launchAction(scope, context, ok, then = { attempt++ }) { block() }
+    fun runUpscaleMsg(block: suspend () -> String) = scope.launch {
+        try { android.widget.Toast.makeText(context, block(), android.widget.Toast.LENGTH_SHORT).show() }
+        catch (e: Exception) { android.widget.Toast.makeText(context, e.readable(), android.widget.Toast.LENGTH_LONG).show() }
+        attempt++
+    }
+    // Un traitement en cours : la fiche se relit toutes les 5 s pour suivre son avancement.
+    val upscaling = detail?.volumes?.any { it.upscaleBusy } == true
+    LaunchedEffect(upscaling) { while (upscaling) { kotlinx.coroutines.delay(5000); attempt++ } }
     // Avancement Komga de chaque tome (comme le site), relu à chaque rechargement et en sortant du lecteur.
     var komga by remember(summary.id) { mutableStateOf<Map<Int, io.github.gwenvador.bullarr.data.KomgaVolumeProgress>>(emptyMap()) }
     LaunchedEffect(summary.id, attempt) {
@@ -350,7 +369,28 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
             onDelete = { deleting = v },
             read = komga[v.id]?.completed == true,
             onToggleRead = { setVolumeRead(v, komga[v.id]?.completed != true) },
+            upscale = if (vm.isReader) null else ({
+                VolumeUpscaleEntries(v, upscaleLimits, onDismiss = { menu = null },
+                    onUpscale = { upscaleAsk = listOf(v) }, onDownscale = { downscaleAsk = listOf(v) },
+                    onCancel = { runUpscale("Annulé") { ServerUpscale.cancel(api, listOf(v.id)) } },
+                    onRestore = { runUpscale(if (v.backupKind == "downscale") "Original remis" else "Version SD remise") { ServerUpscale.restore(api, listOf(v.id)) } })
+            }),
         )
+    }
+    upscaleAsk?.let { list ->
+        val many = list.size > 1
+        UpscaleModelDialog(api, if (many) "Upscaler ${list.size} tomes en HD" else "Upscaler ce tome en HD",
+            (if (many) "Les ${list.size} tomes en basse définition sont agrandis" else "Les pages sont agrandies") +
+                " x2 sur le serveur, un tome à la fois, puis le fichier est remplacé par sa version HD. L'original est gardé et restaurable.",
+            onDismiss = { upscaleAsk = null },
+        ) { model -> upscaleAsk = null; runUpscaleMsg { ServerUpscale.upscale(api, list.map { it.id }, model) } }
+    }
+    downscaleAsk?.let { list ->
+        val many = list.size > 1
+        DownscaleDialog(upscaleLimits, if (many) "Réduire ${list.size} tomes" else "Réduire ce tome",
+            "Les pages plus grandes que la définition choisie sont réduites sur le serveur, les pages lourdes (PNG…) réencodées en JPEG de bonne qualité. Un fichier n'est remplacé que si sa version réduite est plus légère.",
+            side = if (many) 0 else list[0].pageSide, onDismiss = { downscaleAsk = null },
+        ) { target, keep -> downscaleAsk = null; runUpscaleMsg { ServerUpscale.downscale(api, list.map { it.id }, target, keep) } }
     }
     reviewsFor?.let { v -> ReviewsSheet(api, v, "${detail?.title ?: summary.title} · ${v.label}", onDismiss = { reviewsFor = null }) }
     if (readAlso) ReadAlsoSheet(vm, api, summary.id, detail?.title ?: summary.title, onDismiss = { readAlso = false })
@@ -378,6 +418,12 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
         allRead = detail?.volumes?.filter { it.owned }?.let { o -> o.isNotEmpty() && o.all { komga[it.id]?.completed == true } } == true,
         canMarkRead = detail?.volumes?.any { it.owned } == true,
         onToggleRead = { read -> setSeriesRead(read) },
+        upscale = if (vm.isReader) null else detail?.volumes?.let { vs -> {
+            SeriesUpscaleEntries(vs, upscaleLimits, onDismiss = { seriesMenu = false },
+                onUpscale = { upscaleAsk = it }, onDownscale = { downscaleAsk = it },
+                onCancel = { l -> runUpscale("Annulé") { ServerUpscale.cancel(api, l.map { it.id }) } },
+                onRestore = { l -> runUpscale("${l.size} tome(s) restauré(s)") { ServerUpscale.restore(api, l.map { it.id }) } })
+        } },
     )
     if (editingSeries) detail?.let { d ->
         SeriesEditDialog(d, onDismiss = { editingSeries = false }) { changed ->
@@ -782,12 +828,59 @@ private fun VolumeGroupHeader(label: String, owned: Int, total: Int, collapsed: 
     }
 }
 
+/** Entrée de menu d'upscaling : grisée avec sa raison en dessous quand elle n'est pas possible. */
+@Composable
+private fun UpscaleEntry(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, blocked: String?, onDismiss: () -> Unit, action: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val off = blocked != null
+    androidx.compose.material3.ListItem(
+        headlineContent = { Text(label, color = if (off) cs.onSurface.copy(alpha = 0.38f) else Color.Unspecified) },
+        supportingContent = blocked?.let { { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant.copy(alpha = 0.7f)) } },
+        leadingContent = { Icon(icon, contentDescription = null, tint = if (off) cs.onSurfaceVariant.copy(alpha = 0.38f) else cs.onSurfaceVariant) },
+        modifier = Modifier.clickable(enabled = !off) { onDismiss(); action() },
+    )
+}
+
+/** Entrées d'upscaling serveur d'un tome (molette du tome sur le site). */
+@Composable
+private fun VolumeUpscaleEntries(v: VolumeRow, limits: UpscaleLimits, onDismiss: () -> Unit, onUpscale: () -> Unit, onDownscale: () -> Unit, onCancel: () -> Unit, onRestore: () -> Unit) {
+    if (!v.owned) return
+    if (v.upscaleBusy) {
+        val reducing = v.upscaleModel?.startsWith("downscale:") == true
+        UpscaleEntry(Icons.Outlined.Close, if (reducing) "Annuler la réduction" else "Annuler l'upscaling", null, onDismiss, onCancel)
+        return
+    }
+    UpscaleEntry(Icons.Outlined.AutoFixHigh, "Upscaler en HD", limits.upscaleBlocked(v), onDismiss, onUpscale)
+    UpscaleEntry(Icons.Outlined.CloseFullscreen, "Réduire le fichier", limits.downscaleBlocked(v), onDismiss, onDownscale)
+    if (v.sdBackup) UpscaleEntry(Icons.AutoMirrored.Outlined.Undo, if (v.backupKind == "downscale") "Restaurer l'original" else "Restaurer la version SD", null, onDismiss, onRestore)
+}
+
+/** Entrées d'upscaling serveur d'une série (molette de la série sur le site). */
+@Composable
+private fun SeriesUpscaleEntries(vs: List<VolumeRow>, limits: UpscaleLimits, onDismiss: () -> Unit, onUpscale: (List<VolumeRow>) -> Unit, onDownscale: (List<VolumeRow>) -> Unit, onCancel: (List<VolumeRow>) -> Unit, onRestore: (List<VolumeRow>) -> Unit) {
+    if (vs.none { it.owned }) return
+    fun n(l: List<*>) = if (l.size > 1) " (${l.size} tomes)" else ""
+    val eligible = limits.upscalable(vs); val busy = limits.busy(vs); val reducible = limits.reducible(vs); val restorable = limits.restorable(vs)
+    if (eligible.isNotEmpty() || busy.isEmpty())
+        UpscaleEntry(Icons.Outlined.AutoFixHigh, "Upscaler en HD" + n(eligible), if (eligible.isEmpty()) limits.seriesUpscaleReason(vs) else null, onDismiss) { onUpscale(eligible) }
+    UpscaleEntry(Icons.Outlined.CloseFullscreen, "Réduire les tomes lourds" + n(reducible), if (reducible.isEmpty()) limits.seriesDownscaleReason(vs) else null, onDismiss) { onDownscale(reducible) }
+    if (busy.isNotEmpty()) {
+        val reducing = busy.all { it.upscaleModel?.startsWith("downscale:") == true }
+        UpscaleEntry(Icons.Outlined.Close, (if (reducing) "Annuler la réduction" else "Annuler l'upscaling") + n(busy), null, onDismiss) { onCancel(busy) }
+    }
+    if (restorable.isNotEmpty()) {
+        val originals = restorable.all { it.backupKind == "downscale" }
+        UpscaleEntry(Icons.AutoMirrored.Outlined.Undo, (if (originals) "Restaurer l'original" else "Restaurer la version SD") + n(restorable), null, onDismiss) { onRestore(restorable) }
+    }
+}
+
 /** Menu d'une série (appui long sur son nom) : mise à jour, scan, édition, suppression. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SeriesActions(
     title: String, onDismiss: () -> Unit, onReadAlso: () -> Unit, onHistory: () -> Unit, onUpdate: () -> Unit, onScan: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
     allRead: Boolean = false, canMarkRead: Boolean = false, onToggleRead: (Boolean) -> Unit = {},
+    upscale: (@Composable () -> Unit)? = null,
 ) {
     @Composable
     fun Entry(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color? = null, action: () -> Unit) {
@@ -807,6 +900,7 @@ private fun SeriesActions(
             Entry(Icons.Outlined.Sync, "Mettre à jour (Bédéthèque)", action = onUpdate)
             Entry(Icons.Outlined.Refresh, "Scanner les fichiers", action = onScan)
             Entry(Icons.Outlined.Edit, "Éditer la série", action = onEdit)
+            upscale?.invoke()
             Entry(Icons.Outlined.MenuBook, "À lire aussi", action = onReadAlso)
             Entry(Icons.Outlined.History, "Historique", action = onHistory)
             Entry(Icons.Outlined.Delete, "Supprimer la série", MaterialTheme.colorScheme.error, onDelete)
@@ -1069,6 +1163,7 @@ private fun VolumeActions(
     v: VolumeRow, title: String, onDismiss: () -> Unit, onEdit: () -> Unit,
     onRefresh: () -> Unit, onMeta: () -> Unit, onReviews: () -> Unit, onHistory: () -> Unit, onDelete: () -> Unit,
     read: Boolean = false, onToggleRead: () -> Unit = {},
+    upscale: (@Composable () -> Unit)? = null,
 ) {
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     @Composable
@@ -1090,6 +1185,7 @@ private fun VolumeActions(
             Entry(Icons.Outlined.History, "Historique", action = onHistory)
             Entry(Icons.Outlined.Edit, "Éditer les métadonnées", action = onEdit)
             if (v.owned) Entry(Icons.Outlined.Refresh, "Actualiser taille et pages", action = onRefresh)
+            upscale?.invoke()
             Entry(Icons.Outlined.Sync, "Recharger la fiche Bédéthèque", action = onMeta)
             Entry(Icons.Outlined.Delete, "Supprimer", MaterialTheme.colorScheme.error, onDelete)
             // Une seule ligne « Acheter » : un logo par boutique, chacun ouvre sa recherche.

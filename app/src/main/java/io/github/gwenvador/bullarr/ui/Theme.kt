@@ -34,6 +34,8 @@ import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import io.github.gwenvador.bullarr.ui.Icon
@@ -201,6 +203,103 @@ fun AppearanceScreen() {
             "« Système » suit le mode clair ou sombre du téléphone. Ces réglages sont propres à cet appareil.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** Onglet Réglages → Upscaling : upscaling des pages, propre à cet appareil. */
+@Composable
+fun ReaderSettingsScreen(vm: AppViewModel) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        UpscaleSettings(vm)
+        UpscaleTestCard(vm)
+        if (!vm.isReader) {
+            androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            ServerUpscaleSettings(vm)
+        }
+    }
+}
+
+/** Lecteur : amélioration des pages basse définition (activation et modèle). */
+@Composable
+fun UpscaleSettings(vm: AppViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(vm.api) {
+        io.github.gwenvador.bullarr.data.Upscaler.load(context)
+        vm.api?.let { io.github.gwenvador.bullarr.data.Upscaler.syncThreshold(context, it) }
+    }
+    val up = io.github.gwenvador.bullarr.data.Upscaler
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { up.setEnabled(context, !up.enabled) }.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Upscaling des pages basse définition", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Agrandit et nettoie les scans de faible résolution (jusqu'à ${up.maxSourceSide} px, seuil réglé sur le serveur) avec une IA, sur le téléphone. " +
+                        "Aussi réglable dans le lecteur avec la baguette magique. Propre à cet appareil.",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            androidx.compose.material3.Switch(checked = up.enabled, onCheckedChange = { up.setEnabled(context, it) })
+        }
+        Text("Modèles", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "Rapide est inclus dans l'app. Les autres se téléchargent depuis les dépôts publics des projets upscayl et Real-CUGAN (GitHub), " +
+                "puis restent sur le téléphone.",
+            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+        )
+        io.github.gwenvador.bullarr.data.UpscaleModel.entries.forEach { m -> UpscaleModelRow(m) }
+        up.unavailable?.let {
+            Text("Indisponible sur cet appareil : $it", style = MaterialTheme.typography.bodySmall, color = cs.error)
+        }
+    }
+}
+
+/** Un modèle du catalogue : choix s'il est présent, sinon téléchargement (avec progression, annulation et erreur). */
+@Composable
+private fun UpscaleModelRow(m: io.github.gwenvador.bullarr.data.UpscaleModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val up = io.github.gwenvador.bullarr.data.Upscaler
+    val cs = MaterialTheme.colorScheme
+    val present = up.isInstalled(m)
+    val selected = present && up.model == m
+    val progress = up.downloading[m]
+    val mb = "%.1f Mo".format(java.util.Locale.FRANCE, m.downloadSize / 1_000_000.0)
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .border(if (selected) 2.dp else 1.dp, if (selected) cs.primary else cs.outlineVariant, RoundedCornerShape(14.dp))
+            .clickable(enabled = present) { up.setModel(context, m) }.padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (present) androidx.compose.material3.RadioButton(selected = selected, onClick = { up.setModel(context, m) })
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(m.label, style = MaterialTheme.typography.titleSmall, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                Text(m.detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            when {
+                progress != null -> TextButton(onClick = { up.cancelDownload(m) }) { Text("Annuler") }
+                !present -> TextButton(onClick = { up.download(context, m) }) {
+                    Icon(androidx.compose.material.icons.Icons.Outlined.Download, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(mb)
+                }
+                !m.builtin -> IconButton(onClick = { up.delete(context, m) }) {
+                    Icon(androidx.compose.material.icons.Icons.Outlined.Delete, "Supprimer le modèle $mb", tint = cs.onSurfaceVariant)
+                }
+            }
+        }
+        if (progress != null) androidx.compose.material3.LinearProgressIndicator(
+            progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+        up.downloadError[m]?.let {
+            Text("Téléchargement impossible : $it", style = MaterialTheme.typography.bodySmall, color = cs.error, modifier = Modifier.padding(top = 4.dp))
+        }
     }
 }
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.outlined.Apps
@@ -95,7 +96,37 @@ private fun kindIcon(kind: String) = when (kind) {
     "Conversion" -> Icons.Outlined.Autorenew
     "IA" -> Icons.Outlined.AutoAwesome
     "Comptes" -> Icons.Outlined.Person
+    "Upscaling" -> Icons.Outlined.AutoFixHigh
     else -> Icons.Outlined.Apps
+}
+
+/** Filtres de l'historique, dans l'ordre du site. */
+private val HISTORY_GROUPS = listOf("Imports", "Téléchargements", "Recherches", "Renommages", "Conversions", "Suppressions", "IA", "Demandes", "Utilisateurs", "Upscaling")
+
+/** Filtre du site auquel appartient un type de ligne (null : seulement dans « Tous »). */
+private fun historyGroup(kind: String): String? = when (kind) {
+    "Import" -> "Imports"
+    "Téléchargement" -> "Téléchargements"
+    "Recherche", "Acquisition auto" -> "Recherches"
+    "Renommage" -> "Renommages"
+    "Conversion" -> "Conversions"
+    "Tome supprimé" -> "Suppressions"
+    "IA" -> "IA"
+    "Demande" -> "Demandes"
+    "Comptes", "Utilisateur" -> "Utilisateurs"
+    "Upscaling" -> "Upscaling"
+    else -> null
+}
+
+private fun groupIcon(group: String) = when (group) {
+    "Imports" -> kindIcon("Import")
+    "Téléchargements" -> kindIcon("Téléchargement")
+    "Recherches" -> kindIcon("Recherche")
+    "Renommages" -> kindIcon("Renommage")
+    "Conversions" -> kindIcon("Conversion")
+    "Suppressions" -> kindIcon("Tome supprimé")
+    "Utilisateurs" -> kindIcon("Comptes")
+    else -> kindIcon(group)
 }
 
 /** Étiquette de type : icône + texte. */
@@ -191,10 +222,18 @@ private suspend fun loadHistory(api: BullarrApi, seriesId: Int?, errors: Mutable
                 part("Actions") {
                     api.getObject("api/actions/history", q).optJSONArray("history").objects().map { h ->
                         val type = h.str("action_type") ?: "action"
+                        // Upscaling et réduction (demandé, commencé, annulé, terminé…) : un seul type
+                        // « Upscaling », l'étape précise en tête du détail.
+                        val upscale = when {
+                            type == "upscale" && h.bool("success") == false -> "Upscaling impossible"
+                            type == "downscale" && h.bool("success") == false -> "Réduction impossible"
+                            else -> UPSCALE_LABELS[type]
+                        }
                         Row3(
-                            ACTION_LABELS[type] ?: type, h.str("series_title") ?: "(sans série)",
-                            listOfNotNull(statusFr(h.str("detail")), statusFr(h.str("error"))).joinToString(" · ").ifBlank { null },
-                            h.str("created_at"), h.bool("success"), h.int("series_id"), h.str("series_title"),
+                            if (upscale != null) "Upscaling" else ACTION_LABELS[type] ?: type.replace('_', ' ').replaceFirstChar { it.uppercase() },
+                            h.str("series_title") ?: if (upscale != null) upscale else "(sans série)",
+                            listOfNotNull(upscale?.takeIf { h.str("series_title") != null }, statusFr(h.str("detail"))?.removePrefix("Réglages d'upscaling : ")?.replaceFirstChar { it.uppercase() }, statusFr(h.str("error"))).joinToString(" · ").ifBlank { null },
+                            h.str("created_at"), if (type.endsWith("_cancel")) null else h.bool("success"), h.int("series_id"), h.str("series_title"),
                         )
                     }
                 }
@@ -308,6 +347,16 @@ private val ACTION_LABELS = mapOf(
     "search" to "Recherche", "rename" to "Renommage", "add_series" to "Série ajoutée",
     "missing_volume_match" to "Tome trouvé", "auto_acquire" to "Acquisition auto",
     "delete_volume" to "Tome supprimé", "move_volume" to "Tome déplacé", "convert" to "Conversion",
+    "quality_upgrade" to "Upgrade qualité", "request" to "Demande", "user" to "Utilisateur", "ai" to "IA",
+)
+
+/** Étapes de l'upscaling et de la réduction côté serveur, regroupées sous « Upscaling ». */
+private val UPSCALE_LABELS = mapOf(
+    "upscale" to "Upscaling terminé", "upscale_queue" to "Upscaling demandé", "upscale_start" to "Upscaling commencé",
+    "upscale_cancel" to "Upscaling annulé", "upscale_settings" to "Réglages d'upscaling", "upscale_restore" to "Version SD remise",
+    "upscale_backup_delete" to "Version SD supprimée", "downscale" to "Réduction terminée", "downscale_queue" to "Réduction demandée",
+    "downscale_start" to "Réduction commencée", "downscale_cancel" to "Réduction annulée", "downscale_restore" to "Original remis",
+    "downscale_backup_delete" to "Original supprimé",
 )
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -358,17 +407,22 @@ fun HistoryScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
             }
         }
     }
-    val kinds = rows.orEmpty().groupingBy { it.kind }.eachCount().entries.sortedByDescending { it.value }
-    val shown = rows.orEmpty().filter { kind == null || it.kind == kind }
+    // Filtres dans l'ordre du site (/history) ; un type sans filtre n'apparaît que dans « Tous ».
+    val counts = rows.orEmpty().groupingBy { historyGroup(it.kind) }.eachCount()
+    val kinds = HISTORY_GROUPS.mapNotNull { g -> counts[g]?.let { java.util.AbstractMap.SimpleEntry(g, it) } }
+    val shown = rows.orEmpty().filter { kind == null || historyGroup(it.kind) == kind }
     PullToRefreshBox(isRefreshing = loading && rows != null, onRefresh = { scope.launch { load() } }, modifier = Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             // Types d'événements présents, une seule ligne défilante.
             if (kinds.size > 1) item {
                 androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item(key = "tous") {
+                        FilterChip(selected = kind == null, onClick = { kind = null }, label = { Text("Tous · ${rows.orEmpty().size}", maxLines = 1) })
+                    }
                     items(kinds, key = { it.key }) { (k, n) ->
                         FilterChip(selected = kind == k, onClick = { kind = if (kind == k) null else k }, label = {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(kindIcon(k), contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(groupIcon(k), contentDescription = null, modifier = Modifier.size(16.dp))
                                 Text("$k · $n", maxLines = 1)
                             }
                         })

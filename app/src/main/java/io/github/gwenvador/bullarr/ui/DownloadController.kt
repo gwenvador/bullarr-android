@@ -114,6 +114,40 @@ class DownloadController(private val scope: CoroutineScope, private val api: () 
     /** ⚡ en attente de confirmation (Nouveautés). */
     var quick by mutableStateOf<NewsItem?>(null)
 
+    /** ⚡ d'un groupe de Nouveautés : tous ses albums non possédés, dans une même série. */
+    var quickAll by mutableStateOf<List<NewsItem>?>(null)
+
+    /** Ajoute la série une fois (si besoin), puis envoie chaque album du groupe. */
+    fun runQuickAll() {
+        val items = quickAll ?: return
+        val client = api() ?: return
+        quickAll = null
+        val first = items.first()
+        scope.launch { snackbar?.showSnackbar("« ${first.seriesTitle} » : " + (if (first.seriesId == null) "ajout de la série en cours…" else "envoi de ${items.size} albums…")) }
+        scope.launch {
+            var seriesId = items.firstNotNullOfOrNull { it.seriesId }
+            val known = seriesId != null
+            if (seriesId == null) {
+                seriesId = try {
+                    resolveSeries(client, first)
+                } catch (e: Exception) {
+                    val queued = items.count { runCatching { queueReview(client, it, e.readable()) }.isSuccess }
+                    snackbar?.currentSnackbarData?.dismiss()
+                    snackbar?.showSnackbar("« ${first.seriesTitle} » : ${e.readable()}" + if (queued > 0) " $queued album(s) envoyé(s) en validation." else "")
+                    return@launch
+                }
+            }
+            var sent = 0
+            val errors = mutableListOf<String>()
+            items.forEach { item ->
+                try { downloadRelease(client, item, seriesId); sent++ } catch (e: Exception) { errors += e.readable() }
+            }
+            snackbar?.currentSnackbarData?.dismiss()
+            snackbar?.showSnackbar("« ${first.seriesTitle} » : " + (if (known) "" else "série ajoutée, ") + "$sent album(s) envoyé(s)" +
+                (if (errors.isNotEmpty()) ", ${errors.size} en échec : ${errors.first()}" else "."))
+        }
+    }
+
     /**
      * ⚡ « Ajouter la série et télécharger » (addSeriesAndDownloadNouveautes, ebdz-latest.js) :
      * crée la série depuis Bédéthèque si Bullarr ne la connaît pas, ou l'envoie en
@@ -241,6 +275,24 @@ class DownloadController(private val scope: CoroutineScope, private val api: () 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DownloadDialogs(c: DownloadController) {
+    c.quickAll?.let { items ->
+        val first = items.first()
+        val unknown = items.all { it.seriesId == null }
+        AlertDialog(
+            onDismissRequest = { c.quickAll = null },
+            title = { Text(if (unknown) "Ajouter la série et tout importer ?" else "Tout importer ?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(first.seriesTitle, fontWeight = FontWeight.SemiBold)
+                    Text(items.joinToString("\n") { "• " + it.title }, style = MaterialTheme.typography.bodySmall, maxLines = 12, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    if (unknown) Text("La série sera créée depuis Bédéthèque, ou envoyée en validation si aucune fiche ne correspond.")
+                    Text("${items.size} album(s) seront envoyés au client de téléchargement.")
+                }
+            },
+            confirmButton = { TextButton(onClick = { c.runQuickAll() }) { Text("Lancer") } },
+            dismissButton = { TextButton(onClick = { c.quickAll = null }) { Text("Annuler") } },
+        )
+    }
     c.quick?.let { item ->
         val toSend = when (item.type) {
             NewsType.EBDZ -> item.files.count { !it.owned }

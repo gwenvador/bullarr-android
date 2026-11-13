@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -113,6 +114,10 @@ fun SearchScreen(vm: AppViewModel) {
     var sortMenu by remember { mutableStateOf(false) }
     var formatFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var onlyConfirmed by rememberSaveable { mutableStateOf(false) }
+    var adding by remember { mutableStateOf(false) }
+    if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = s.title.trim(), onAdded = { sid, title ->
+        adding = false; vm.section = Section.Library; vm.openSeriesById(sid, title)
+    })
     fun sourceAction(r: SearchResult): (() -> Unit)? = r.sourceLink?.let { link -> { runCatching { uri.openUri(link) } } }
     fun downloadFor(r: SearchResult, j: DownloadJob) {
         val ctx = s.context
@@ -167,6 +172,8 @@ fun SearchScreen(vm: AppViewModel) {
                         if (sortKey != null) DropdownMenuItem(text = { Text("Ordre par défaut") }, onClick = { sortKey = null; sortMenu = false })
                     }
                 }
+                // Ajout d'une série (Découvrir du site) : recherche Bédéthèque puis ajout à la bibliothèque.
+                IconButton(onClick = { adding = true }) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, contentDescription = if (vm.isReader) "Demander une série" else "Ajouter une série") }
             }
             // Sources : appui pour afficher / masquer leurs résultats, appui long pour les activer / désactiver.
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

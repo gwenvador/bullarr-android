@@ -1,5 +1,11 @@
 package io.github.gwenvador.bullarr.ui
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -164,38 +170,90 @@ fun SeriesAddDialog(vm: AppViewModel, onDismiss: () -> Unit, initialQuery: Strin
     )
 }
 
-/** Choix d'une série de la bibliothèque (filtre par nom) et, en option, d'un numéro de tome. */
+/** Type de tome visé par une assignation : mêmes cas que la page /import du web (champs de /api/activity/update-tracking). */
+enum class VolumeKind(val label: String, val flag: String?, val numberField: String) {
+    Tome("Tome", null, "volume_number"),
+    Integral("Intégrale", "is_integral", "integral_number"),
+    Hs("HS", "is_hs", "hs_number"),
+    Episode("Épisode", "is_episode", "episode_number"),
+}
+
+/** Tome visé : type et numéro (facultatif). */
+data class VolumeTarget(val kind: VolumeKind, val number: Int?) {
+    fun putInto(o: org.json.JSONObject) = o.apply {
+        kind.flag?.let { put(it, true) }
+        if (number != null) put(kind.numberField, number)
+    }
+}
+
+/** Choix d'une série de la bibliothèque (filtre par nom) et, en option, du tome : tome, intégrale, hors-série ou épisode. */
 @Composable
-fun AssignSeriesDialog(vm: AppViewModel, count: Int, initialQuery: String, onDismiss: () -> Unit, onAddNew: () -> Unit, onPick: (seriesId: Int, volume: Int?) -> Unit) {
+fun AssignSeriesDialog(vm: AppViewModel, count: Int, initialQuery: String, onDismiss: () -> Unit, onAddNew: () -> Unit, onPick: (seriesId: Int, target: VolumeTarget?, importNow: Boolean) -> Unit) {
     androidx.compose.runtime.LaunchedEffect(vm.api) { vm.loadLibrary() }
     var query by remember { mutableStateOf(initialQuery) }
     var volume by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf(VolumeKind.Tome) }
+    var picked by remember { mutableStateOf<Int?>(null) }
     val terms = io.github.gwenvador.bullarr.data.normalize(query).split(' ').filter { it.isNotBlank() }
-    val matches = vm.series.filter { s -> terms.isEmpty() || terms.all { it in s.searchKey } }.take(60)
+    // Toutes les séries qui contiennent tous les mots ; sinon les plus proches (le nom deviné d'un fichier a souvent des mots en trop).
+    val matches = vm.series.filter { s -> terms.isEmpty() || terms.all { it in s.searchKey } }.take(60).ifEmpty {
+        vm.series.map { s -> s to terms.count { it.length > 2 && it in s.searchKey } }
+            .filter { it.second > 0 }.sortedByDescending { it.second }.take(30).map { it.first }
+    }
+    // Une intégrale peut ne pas avoir de numéro ; un tome sans numéro efface le tome suivi.
+    // Une seule série proposée : choisie d'office.
+    val chosen = picked?.takeIf { id -> matches.any { it.id == id } } ?: matches.singleOrNull()?.id
+    fun target() = volume.toIntOrNull().let { n -> if (kind == VolumeKind.Tome && n == null) null else VolumeTarget(kind, n) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Assigner $count téléchargement(s) à une série") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = { Text("Série") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(
-                        value = volume, onValueChange = { volume = it.filter(Char::isDigit) }, singleLine = true,
-                        label = { Text("Tome") }, modifier = Modifier.width(84.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                    )
+                OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = { Text("Série") }, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    VolumeKind.entries.forEach { k ->
+                        androidx.compose.material3.FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(k.label) })
+                    }
                 }
-                Text("Le numéro de tome est facultatif ; vide, le tome suivi est effacé.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(
+                    value = volume, onValueChange = { volume = it.filter(Char::isDigit) }, singleLine = true,
+                    label = { Text("Numéro (${kind.label.lowercase()})") }, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                )
+                Text(
+                    if (kind == VolumeKind.Tome) "Le numéro est facultatif ; vide, le tome suivi est effacé."
+                    else "Numéro facultatif. Le tome est créé à l'import s'il n'existe pas encore dans la série.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (vm.series.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-                LazyColumn(Modifier.heightIn(max = 300.dp)) {
+                if (vm.series.isNotEmpty() && matches.isEmpty()) Text(
+                    "Aucune série ne correspond : raccourcissez le nom, ou créez la série avec « Nouvelle série… ».",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                )
+                LazyColumn(Modifier.heightIn(max = 240.dp)) {
                     items(matches, key = { it.id }) { s ->
-                        Text(s.title, modifier = Modifier.fillMaxWidth().clickable { onDismiss(); onPick(s.id, volume.toIntOrNull()) }.padding(vertical = 10.dp))
+                        val on = s.id == chosen
+                        Row(
+                            Modifier.fillMaxWidth().clickable { picked = s.id }
+                                .background(if (on) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(s.title, modifier = Modifier.weight(1f), fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
+                            if (on) Icon(Icons.Outlined.CheckCircle, contentDescription = "Choisie", tint = MaterialTheme.colorScheme.primary)
+                        }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
+                TextButton(onClick = { onDismiss(); onAddNew() }) { Text("Série absente ? Nouvelle série…") }
             }
         },
-        confirmButton = { TextButton(onClick = { onDismiss(); onAddNew() }) { Text("Nouvelle série…") } },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(enabled = chosen != null, onClick = { chosen?.let { onDismiss(); onPick(it, target(), false) } }) { Text("Assigner") }
+                androidx.compose.material3.Button(enabled = chosen != null, onClick = { chosen?.let { onDismiss(); onPick(it, target(), true) } }) { Text("Assigner et importer") }
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
 }

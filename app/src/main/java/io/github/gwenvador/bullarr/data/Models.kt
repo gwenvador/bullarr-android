@@ -49,7 +49,7 @@ fun volumeLabel(o: JSONObject): String {
         o.bool("is_hs") == true -> "HS ${n("hs_number")}".trim()
         o.bool("is_episode") == true -> "Épisode ${n("episode_number")}".trim()
         o.bool("is_special") == true -> o.str("special_label") ?: "Spécial"
-        o.str("volume_number") != null -> "Tome ${n("volume_number")}${o.str("bis_suffix") ?: ""}"
+        o.str("volume_number") != null -> "Tome ${n("volume_number")}" + (o.str("bis_suffix")?.trim()?.ifBlank { null }?.let { " $it" } ?: if (o.bool("is_bis") == true) " Bis" else "")
         o.bool("is_oneshot") == true -> "One-shot"
         else -> ""
     }
@@ -258,7 +258,19 @@ data class VolumeRow(
     val isbn: String?,
     val author: String?,
     val komgaUrl: String?,
-)
+    /** Définition mesurée des pages (plus grand côté = max des deux), pour l'upscaling serveur. */
+    val pageWidth: Int? = null,
+    val pageHeight: Int? = null,
+    /** Original gardé (version SD d'un upscaling, ou original d'une réduction : [backupKind]). */
+    val sdBackup: Boolean = false,
+    val backupKind: String? = null,
+    /** Travail d'upscaling / réduction du tome : queued, running, done, error, cancelled. */
+    val upscaleStatus: String? = null,
+    val upscaleModel: String? = null,
+) {
+    val pageSide: Int get() = maxOf(pageWidth ?: 0, pageHeight ?: 0)
+    val upscaleBusy: Boolean get() = upscaleStatus == "queued" || upscaleStatus == "running"
+}
 
 data class SeriesDetail(
     val id: Int,
@@ -320,6 +332,12 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
             isbn = v.str("isbn"),
             author = v.str("author"),
             komgaUrl = v.str("komga_book_url"),
+            pageWidth = v.int("page_width"),
+            pageHeight = v.int("page_height"),
+            sdBackup = v.bool("sd_backup") == true,
+            backupKind = v.str("backup_kind"),
+            upscaleStatus = v.str("upscale_status"),
+            upscaleModel = v.str("upscale_model"),
         )
     }
     return SeriesDetail(

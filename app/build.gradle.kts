@@ -18,8 +18,18 @@ android {
         applicationId = "io.github.gwenvador.bullarr"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.8"
+        versionCode = 13
+        versionName = "1.9"
+        // Amélioration d'image (code natif) : téléphones ARM 64 et 32 bits.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+    }
+
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
     }
 
     signingConfigs {
@@ -41,6 +51,9 @@ android {
 
     buildFeatures { compose = true }
 
+    // Bibliothèques natives compressées dans l'APK (≈ 10 Mo → 3 Mo pour ncnn) : téléchargement et mise à jour plus légers.
+    packaging { jniLibs { useLegacyPackaging = true } }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -60,4 +73,5 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0")
     // Avatars proposés par le serveur (SVG).
     implementation("com.caverock:androidsvg-aar:1.4")
+    testImplementation("junit:junit:4.13.2")
 }
