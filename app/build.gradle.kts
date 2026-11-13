@@ -60,4 +60,7 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0")
     // Avatars proposés par le serveur (SVG).
     implementation("com.caverock:androidsvg-aar:1.4")
+    // Tests unitaires (JVM) ; org.json réel, la version d'Android n'existant pas hors appareil.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

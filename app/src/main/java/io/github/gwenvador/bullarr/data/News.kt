@@ -39,6 +39,30 @@ data class NewsItem(
 
 private val OUT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
+// Regroupement des Nouveautés sans série connue (même règle que static/js/ebdz-latest.js côté serveur).
+private val EXTENSION = Regex("\\.(cbz|cbr|cb7|cbt|pdf|epub|zip|rar|7z)$", RegexOption.IGNORE_CASE)
+private val RELEASE_SUFFIX = Regex("\\s*[\\[(](cbz|cbr|cb7|pdf|epub)[\\])]\\s*(?:-\\s*[\\w.-]+)?\\s*$", RegexOption.IGNORE_CASE)
+private val WORD_DOT = Regex("(?<!\\d)\\.|\\.(?!\\d)")
+private val VOLUME_MARK = Regex("^(.*?)(?:^|[\\s._\\-(\\[])(?:T|Tome|Vol(?:ume)?\\.?)\\s*\\.?\\s*\\d{1,3}(?!\\d)", RegexOption.IGNORE_CASE)
+private val TRAILING_SEPARATORS = Regex("[\\s._\\-(\\[]+$")
+
+/** Nom lisible d'un fichier de release : sans extension ni suffixe « [CBZ]-Groupe », points et _ en espaces. */
+fun newsPrettyName(raw: String): String {
+    var s = EXTENSION.replace(raw.trim(), "")
+    s = RELEASE_SUFFIX.replace(s, "")
+    if ((s.contains('.') || s.contains('_')) && s.count { it == ' ' } < 3) {
+        s = WORD_DOT.replace(s.replace('_', ' '), " ")
+    }
+    return s.replace(Regex("\\s+"), " ").trim()
+}
+
+/** Titre de série deviné d'un nom de release (« Dragonball Perfect Edition T05 » → « Dragonball Perfect Edition ») ; "" sinon. */
+fun newsGuessSeriesTitle(raw: String): String {
+    val m = VOLUME_MARK.find(newsPrettyName(raw)) ?: return ""
+    val t = TRAILING_SEPARATORS.replace(m.groupValues[1], "").trim()
+    return if (t.length >= 2) t else ""
+}
+
 /** ISO avec fuseau (RSS) → heure locale ; sinon on garde les 16 premiers caractères. */
 fun localDate(s: String?): String? {
     s ?: return null

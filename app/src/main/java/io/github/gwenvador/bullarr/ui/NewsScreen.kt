@@ -15,6 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.graphics.SolidColor
+import io.github.gwenvador.bullarr.data.newsGuessSeriesTitle
 import io.github.gwenvador.bullarr.data.normalize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -561,9 +562,20 @@ internal fun newsGroupKey(item: NewsItem): String? {
     item.bedethequeUrl?.takeIf { it.isNotBlank() }?.let { return "b:$it" }
     val r = item.raw
     fun str(k: String) = r.optString(k, "").takeIf { it.isNotBlank() && it != "null" }
-    val title = if (item.type == NewsType.EBDZ) str("matched_series_title") ?: str("bedetheque_title") ?: str("title")
-    else str("series_title") ?: str("bedetheque_title") ?: str("parsed_title")
+    // Sans série connue : titre deviné du nom de release (même règle que le site), pour que
+    // « Dragonball Perfect Edition T05 » et « …T06 » se suivent dans un même groupe.
+    fun guess(s: String?) = s?.let { newsGuessSeriesTitle(it) }?.takeIf { it.isNotEmpty() }
+    val title = if (item.type == NewsType.EBDZ) str("matched_series_title") ?: str("bedetheque_title") ?: str("title") ?: guess(item.title)
+    else str("series_title") ?: str("bedetheque_title") ?: str("parsed_title") ?: guess(item.title.takeIf { it.isNotBlank() } ?: str("filename"))
     return title?.let { normalize(it).trim() }?.takeIf { it.isNotEmpty() }?.let { "t:$it" }
+}
+
+/** Nom affiché en tête de groupe : le titre deviné quand la série n'est connue que par le titre brut de l'entrée. */
+internal fun newsGroupName(item: NewsItem): String {
+    val raw = item.seriesTitle
+    val filename = item.raw.optString("filename", "").takeIf { it.isNotBlank() && it != "null" }
+    if (raw != item.title && raw != filename) return raw
+    return newsGuessSeriesTitle(raw).ifEmpty { raw }
 }
 
 /** Regroupe les entrées CONSÉCUTIVES d'une même série ; un album d'une autre série coupe le groupe. */
@@ -588,7 +600,7 @@ private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: 
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(first.seriesTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                Text(newsGroupName(first), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 GenreFlag(genre)
             }
