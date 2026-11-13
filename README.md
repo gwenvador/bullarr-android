@@ -46,9 +46,21 @@ nouvelle version. Depuis le téléphone, ouvrez ce lien (Obtainium installé) :
     obtainium://add/https://github.com/gwenvador/bullarr-android
 
 Ou, dans Obtainium, **Ajouter une application** → collez `https://github.com/gwenvador/bullarr-android`.
-Chaque release ne contient qu'un seul APK (`bullarr-android-<version>.apk`), qu'Obtainium choisit
-seul ; il est signé avec la même clé que les autres canaux, donc les mises à jour s'installent
+Depuis la 1.9, une release contient deux APK : l'application (`bullarr-android-<version>.apk`) et
+l'extension Mihon (`bullarr-mihon-<version>.apk`). Si Obtainium demande lequel installer, choisissez
+`bullarr-android-…`, ou mettez `bullarr-android` dans le réglage **Filtre d'APK (regex)** de l'application
+pour qu'il le choisisse seul. L'APK de l'application est signé avec la même clé que les autres canaux, donc les mises à jour s'installent
 par-dessus une version venue de F-Droid ou d'un APK téléchargé.
+
+### Extension Mihon / Tachiyomi
+
+Pour lire la bibliothèque Bullarr dans [Mihon](https://mihon.app) (ou Tachiyomi), installez l'extension
+Bullarr : [bullarr-mihon-1.6.3.apk](https://github.com/gwenvador/bullarr-android/releases/download/v1.9/bullarr-mihon-1.6.3.apk)
+(SHA-256 `489efa167bd37b99b9aa71f73cff6307a206653782808c3238032cc7f1333138`). C'est la même extension
+que celle servie par le serveur Bullarr (`/static/extensions/bullarr-mihon.apk`, lien dans **À propos** du
+site et dans **Réglages** de l'app). Elle est signée avec une clé de débogage, comme les extensions Mihon non
+officielles : Mihon demande de lui faire confiance au premier lancement. Ensuite, **Sources → Bullarr →
+réglages** : adresse du serveur, puis identifiant et mot de passe, ou clé API.
 
 ### Dépôt F-Droid
 
