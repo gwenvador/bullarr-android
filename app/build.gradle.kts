@@ -10,6 +10,15 @@ val bullarrSigning = (project.findProperty("bullarrSigningFile") as String?)?.le
     Properties().apply { file(path).inputStream().use { load(it) } }
 }
 
+// Adresse du serveur dont les liens s'ouvrent dans l'app (App Links), pour un APK PERSONNEL seulement :
+// propriété bullarrLinkHost de local.properties (hors du dépôt) ou -PbullarrLinkHost=…
+// Les APK publiés se construisent avec -PbullarrLinkHost= (vide) : aucun domaine privé dans l'APK.
+val bullarrLinkHost: String = (project.findProperty("bullarrLinkHost") as String?)
+    ?: rootProject.file("local.properties").takeIf { it.exists() }?.let { f ->
+        Properties().apply { f.inputStream().use { load(it) } }.getProperty("bullarrLinkHost")
+    }
+    ?: ""
+
 android {
     namespace = "io.github.gwenvador.bullarr"
     compileSdk = 36
@@ -18,10 +27,12 @@ android {
         applicationId = "io.github.gwenvador.bullarr"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.9"
+        versionCode = 14
+        versionName = "1.10"
         // Amélioration d'image (code natif) : téléphones ARM 64 et 32 bits.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        // Sans adresse : nom réservé .invalid, qui ne correspond à aucun lien.
+        manifestPlaceholders["linkHost"] = bullarrLinkHost.trim().ifEmpty { "linkhost.invalid" }
     }
 
     ndkVersion = "28.2.13676358"
@@ -74,4 +85,5 @@ dependencies {
     // Avatars proposés par le serveur (SVG).
     implementation("com.caverock:androidsvg-aar:1.4")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

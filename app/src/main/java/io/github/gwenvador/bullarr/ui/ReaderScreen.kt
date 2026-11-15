@@ -196,7 +196,7 @@ fun ReaderScreen(vm: AppViewModel, target: ReaderTarget, onClose: () -> Unit) {
             // Une clé par tome : passer au suivant repart d'un lecteur neuf.
             m != null -> key(m.volumeId) {
                 val manga = vm.series.firstOrNull { it.id == m.seriesId }?.origin == "Asie"
-                Reader(api, online, vm.offline.store, m, ReadingProgress(context), manga, neighbours.first, neighbours.second, onOpen = { vm.reading = it }, onClose = onClose)
+                Reader(api, online, vm.offline.store, m, ReadingProgress(context), manga, neighbours.first, neighbours.second, onOpen = { vm.reading = it }, onClose = onClose, isAdmin = !vm.isReader)
             }
             else -> {
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -222,7 +222,7 @@ private fun spreadsOf(total: Int, double: Boolean): List<List<Int>> =
 @Composable
 private fun Reader(
     api: BullarrApi, online: Boolean, offline: OfflineStore, meta: ReaderMeta, progress: ReadingProgress,
-    manga: Boolean, prev: ReaderTarget?, next: ReaderTarget?, onOpen: (ReaderTarget) -> Unit, onClose: () -> Unit,
+    manga: Boolean, prev: ReaderTarget?, next: ReaderTarget?, onOpen: (ReaderTarget) -> Unit, onClose: () -> Unit, isAdmin: Boolean = true,
 ) {
     val total = meta.pageCount
     if (total <= 0) {
@@ -491,7 +491,7 @@ private fun Reader(
                                 trailingIcon = { check(Upscaler.enabled && Upscaler.model == m) },
                             )
                         }
-                        Text(
+                        if (isAdmin) Text(
                             "Autres modèles à télécharger : Réglages → Upscaling", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )

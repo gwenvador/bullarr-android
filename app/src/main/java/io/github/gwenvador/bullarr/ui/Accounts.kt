@@ -91,6 +91,7 @@ private fun requestStatus(status: String?): Pair<String, Color> {
     return when (status) {
         "pending" -> "En attente" to cs.tertiary
         "adding" -> "Ajout en cours" to cs.primary
+        "searching" -> "Recherche lancée" to cs.primary
         "added" -> "Ajoutée" to cs.primary
         "already" -> "Déjà présente" to cs.primary
         "rejected" -> "Refusée" to cs.error
@@ -104,7 +105,9 @@ private fun requestStatus(status: String?): Pair<String, Color> {
 @Composable
 private fun RequestRow(vm: AppViewModel, r: JSONObject, showUser: Boolean, onOpen: ((Int, String) -> Unit)?, actions: @Composable () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
-    val title = r.str("title") ?: r.str("url") ?: "(sans titre)"
+    val isVolume = r.str("kind") == "volume"
+    // Demande de tome : « Série · Tome N ».
+    val title = (r.str("title") ?: r.str("url") ?: "(sans titre)") + (r.str("volume_label")?.takeIf { isVolume }?.let { " · $it" } ?: "")
     val sid = r.int("series_id")
     val (label, color) = requestStatus(r.str("status"))
     Row(
@@ -127,7 +130,7 @@ private fun RequestRow(vm: AppViewModel, r: JSONObject, showUser: Boolean, onOpe
                 if (showUser) r.str("user_name") else null,
                 utcToLocal(r.str("created_at")),
                 r.str("library_name"),
-                r.int("total")?.takeIf { sid != null }?.let { "${r.int("owned") ?: 0}/$it tomes" },
+                r.int("total")?.takeIf { sid != null && !isVolume }?.let { "${r.int("owned") ?: 0}/$it tomes" },
             ).joinToString(" · ")
             if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             r.str("error")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (r.str("status") == "rejected") cs.onSurfaceVariant else cs.error, maxLines = 3, overflow = TextOverflow.Ellipsis) }
@@ -281,29 +284,30 @@ fun AdminRequestsBlock(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
 
     approving?.let { r ->
         val id = r.int("id") ?: return@let
+        val isVolume = r.str("kind") == "volume"
         var lib by remember(r) { mutableStateOf(r.int("library_id") ?: vm.selectedLibrary?.id ?: vm.libraries.firstOrNull()?.id) }
         AlertDialog(
             onDismissRequest = { approving = null },
             title = { Text("Valider la demande") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("« ${r.str("title") ?: r.str("url")} », demandée par ${r.str("user_name") ?: "?"}.")
-                    if (vm.libraries.size > 1) {
+                    Text("« ${r.str("title") ?: r.str("url")}${r.str("volume_label")?.takeIf { isVolume }?.let { " · $it" } ?: ""} », demandée par ${r.str("user_name") ?: "?"}.")
+                    if (vm.libraries.size > 1 && !isVolume) {
                         Text("Bibliothèque", style = MaterialTheme.typography.labelLarge)
                         @OptIn(ExperimentalLayoutApi::class)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             vm.libraries.forEach { l -> FilterChip(selected = lib == l.id, onClick = { lib = l.id }, label = { Text(l.name) }) }
                         }
                     }
-                    Text("La série est ajoutée en arrière-plan depuis Bédéthèque, puis ses tomes sont recherchés.",
+                    Text(if (isVolume) "La recherche de ce tome est lancée, puis il est téléchargé et importé." else "La série est ajoutée en arrière-plan depuis Bédéthèque, puis ses tomes sont recherchés.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     approving = null
-                    launchAction(scope, context, "Demande validée : ajout en cours", then = { reload() }) {
-                        api.postObject("api/requests/$id/approve", JSONObject().apply { lib?.let { put("library_id", it) } })
+                    launchAction(scope, context, if (isVolume) "Demande validée : recherche du tome lancée" else "Demande validée : ajout en cours", then = { reload() }) {
+                        api.postObject("api/requests/$id/approve", JSONObject().apply { if (!isVolume) lib?.let { put("library_id", it) } })
                     }
                 }) { Text("Valider") }
             },

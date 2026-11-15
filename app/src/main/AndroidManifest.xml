@@ -34,6 +34,28 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="bullarr" android:host="auth" />
             </intent-filter>
+            <!-- Page du site ouverte dans l'app : bullarr://series/12, bullarr://nouveautes… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bullarr" />
+            </intent-filter>
+            <!-- Liens vers le serveur (APK personnel : hôte donné à la compilation, voir build.gradle.kts). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="${linkHost}" />
+            </intent-filter>
+            <!-- « Partager → Bullarr » depuis le navigateur : l'adresse d'une page du site. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <service

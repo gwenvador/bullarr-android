@@ -163,6 +163,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // Navigation : les 5 rubriques de la barre latérale web, chacune avec ses sous-onglets.
     var section by mutableStateOf(Section.Library)
     val subTab = androidx.compose.runtime.mutableStateMapOf<Section, Int>()
+    /** Déplacements de série vers une autre bibliothèque en cours : id de série → nom de la bibliothèque cible. */
+    val seriesMoves = androidx.compose.runtime.mutableStateMapOf<Int, String>()
     /** Fiche série ouverte par-dessus la rubrique courante. */
     var openSeries by mutableStateOf<SeriesSummary?>(null)
 
@@ -187,6 +189,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Lien vers une page du site (partagé vers l'app, ou bullarr://series/12) : ouvre l'écran équivalent.
+     * Renvoie un message d'erreur, ou null si le lien est pris en charge.
+     */
+    fun openWebLink(uri: android.net.Uri): String? {
+        val path: String = when (uri.scheme?.lowercase()) {
+            "bullarr" -> "/" + listOfNotNull(uri.host, uri.path?.trim('/')?.ifBlank { null }).joinToString("/")
+            "http", "https" -> {
+                val server = runCatching { android.net.Uri.parse(settings.serverUrl.trim().let { if ("://" in it) it else "http://$it" }) }.getOrNull()
+                if (server?.host == null || !server.host.equals(uri.host, ignoreCase = true)) return "Ce lien n'est pas une page de votre serveur Bullarr"
+                // Bullarr servi sous un sous-chemin (https://hote/bullarr/…) : on retire ce préfixe.
+                val base = server.path?.trimEnd('/').orEmpty()
+                (uri.path ?: "/").removePrefix(base).ifBlank { "/" }
+            }
+            else -> return "Lien non pris en charge"
+        }
+        val parts = path.trim('/').split('/').filter { it.isNotBlank() }
+        fun go(sec: Section, sub: String? = null) {
+            if (sec !in sections()) return
+            openSeries = null; section = sec
+            sub?.let { name -> subsOf(sec).indexOf(name).takeIf { it >= 0 }?.let { subTab[sec] = it } }
+        }
+        when (parts.firstOrNull()) {
+            null, "" -> go(Section.Library)
+            "series" -> {
+                val id = parts.getOrNull(1)?.toIntOrNull() ?: return "Série introuvable dans le lien"
+                section = Section.Library
+                openSeriesById(id, series.firstOrNull { it.id == id }?.title ?: "Série")
+            }
+            "library" -> {
+                go(Section.Library)
+                parts.getOrNull(1)?.toIntOrNull()?.let { id -> libraries.firstOrNull { it.id == id }?.let { selectLibrary(it) } }
+            }
+            "activity", "import" -> go(Section.Tracking, "Activité")
+            "nouveautes", "ebdz-nouveautes" -> go(Section.Tracking, "Nouveautés")
+            "validation" -> go(Section.Tracking, "Validation")
+            "history" -> go(Section.Tracking, "Historique")
+            "demandes" -> if (isReader) go(Section.Requests) else go(Section.Tracking, "Validation")
+            "discover" -> go(Section.Search)
+            "bedetheque-enrich" -> go(Section.Actions, "Enrichir")
+            "missing-monitor" -> go(Section.Actions, "Surveillance")
+            "verification" -> go(Section.Actions, "Vérification")
+            "upscaling" -> go(Section.Actions, "Upscaling")
+            "profil" -> go(Section.Config, "Profil")
+            "settings" -> go(Section.Config)
+            else -> go(Section.Library)
+        }
+        return null
+    }
+
     /** Rubriques de la barre du bas selon le rôle. */
     fun sections(): List<Section> =
         if (isReader) listOf(Section.Library, Section.Requests, Section.Config)
@@ -194,7 +246,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Sous-onglets d'une rubrique selon le rôle (les réglages du serveur sont réservés aux administrateurs). */
     fun subsOf(s: Section): List<String> =
-        if (s == Section.Config && isReader) listOf("Profil", "Intégrations", "Apparence", "Upscaling", "À propos") else s.subs
+        if (s == Section.Config && isReader) listOf("Profil", "Intégrations", "Apparence", "À propos") else s.subs
 
     /** Demandes de BD et de comptes à valider (administrateurs). */
     var requestCount by androidx.compose.runtime.mutableIntStateOf(0)
@@ -270,6 +322,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setSort(o: LibrarySort, desc: Boolean) {
         sort = o; sortDesc = desc
         libPrefs.edit().putString("sort", o.name).putBoolean("sortDesc", desc).apply()
+    }
+
+    /** Séries d'une bibliothèque (cache mémoire, sinon réseau) : choix d'une série cible. */
+    suspend fun librarySeries(libraryId: Int): List<SeriesSummary> {
+        seriesByLibrary[libraryId]?.let { return it }
+        val client = api ?: return emptyList()
+        return parseSeriesList(client.getArray("api/library/$libraryId/series")).also { seriesByLibrary[libraryId] = it }
     }
 
     fun loadLibrary(force: Boolean = false, library: Library? = selectedLibrary) {

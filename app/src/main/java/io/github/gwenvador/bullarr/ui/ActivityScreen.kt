@@ -61,6 +61,7 @@ import io.github.gwenvador.bullarr.data.parseActivity
 import io.github.gwenvador.bullarr.data.readable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.lifecycle.viewModelScope
 import org.json.JSONObject
 import io.github.gwenvador.bullarr.data.objects
 import io.github.gwenvador.bullarr.data.int
@@ -157,9 +158,23 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var assigning by remember { mutableStateOf(false) }
     var confirmImport by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
+    // Import manuel en arrière-plan (portée du ViewModel : il survit à un changement d'écran) ;
+    // une petite carte le signale en haut de la liste et le résultat s'affiche en toast à la fin.
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    fun runImport(work: suspend () -> String) {
+        importing = true
+        vm.viewModelScope.launch {
+            val message = try { RunningActions.track("Import manuel") { work() } } catch (e: Exception) { e.readable() }
+            importing = false
+            android.widget.Toast.makeText(appContext, message, android.widget.Toast.LENGTH_LONG).show()
+            runCatching { refresh() }
+        }
+    }
     var adding by remember { mutableStateOf(false) }
     var assignVolume by remember { mutableStateOf<Int?>(null) }
     var addingFor by remember { mutableStateOf<List<Int>>(emptyList()) }
+    // Appui sur un album dont l'import échoue : ouvre directement la résolution (série / tome / import).
+    var resolving by remember { mutableStateOf<Pair<Int, String>?>(null) }
     fun assign(seriesId: Int, target: VolumeTarget?, only: List<Int>? = null, importNow: Boolean = false) {
         val ids = only ?: selected.mapNotNull { trackers[it] }
         selected = emptyList()
@@ -172,12 +187,11 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
             }
             if (importNow && failed == null) {
                 // Assigné puis importé tout de suite (comme « Importer » sur la sélection).
-                importing = true
-                val message = try { manualImport(api, ids.toSet(), target) } catch (e: Exception) { e.readable() }
-                importing = false
-                snackbar.showSnackbar(message, duration = androidx.compose.material3.SnackbarDuration.Long)
-            } else snackbar.showSnackbar(failed ?: "${ids.size} téléchargement(s) assigné(s)")
-            refresh()
+                runImport { manualImport(api, ids.toSet(), target) }
+            } else {
+                snackbar.showSnackbar(failed ?: "${ids.size} téléchargement(s) assigné(s)")
+                refresh()
+            }
         }
     }
     status?.let { st ->
@@ -199,11 +213,6 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         names["w-${w.key}"] = w.filename
         deleters["w-${w.key}"] = { deleteWaitingFile(api, tid) }
     }
-    if (importing) androidx.compose.material3.AlertDialog(
-        onDismissRequest = {}, confirmButton = {},
-        title = { Text("Import manuel en cours") },
-        text = { LinearProgressIndicator(Modifier.fillMaxWidth()) },
-    )
     if (confirmImport) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmImport = false },
         title = { Text(if (selected.count { it in trackers } > 1) "Importer ces albums ?" else "Importer cet album ?") },
@@ -214,19 +223,19 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         confirmButton = {
             TextButton(onClick = {
                 confirmImport = false
-                val ids = selected.mapNotNull { trackers[it] }.toSet(); selected = emptyList(); importing = true
-                scope.launch {
-                    val message = try { manualImport(api, ids) } catch (e: Exception) { e.readable() }
-                    importing = false
-                    snackbar.showSnackbar(message, duration = androidx.compose.material3.SnackbarDuration.Long)
-                    refresh()
-                }
+                val ids = selected.mapNotNull { trackers[it] }.toSet(); selected = emptyList()
+                runImport { manualImport(api, ids) }
             }) { Text("Importer") }
         },
         dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Annuler") } },
     )
     if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { addingFor = selected.mapNotNull { trackers[it] }; adding = true }, onPick = { sid, vol, now -> assign(sid, vol, importNow = now) })
-    if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName(selected.firstOrNull()?.let { names[it] }), onAdded = { sid, _ -> assign(sid, null, addingFor) })
+    resolving?.let { (tid, name) ->
+        AssignSeriesDialog(vm, 1, guessSeriesName(name), onDismiss = { resolving = null },
+            onAddNew = { addingFor = listOf(tid); resolving = null; adding = true },
+            onPick = { sid, vol, now -> resolving = null; assign(sid, vol, only = listOf(tid), importNow = now) })
+    }
+    if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName((selected.firstOrNull()?.let { names[it] }) ?: addingFor.firstOrNull()?.let { t -> names.entries.firstOrNull { trackers[it.key] == t }?.value }), onAdded = { sid, _ -> assign(sid, null, addingFor) })
     if (confirmBatch) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmBatch = false },
         title = { Text("Supprimer ${selected.size} téléchargement(s) ?") },
@@ -273,6 +282,14 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                     IconButton(onClick = { confirmBatch = true }) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer la sélection", tint = MaterialTheme.colorScheme.error) }
                 }
             }
+            if (importing) item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Import manuel en cours…", style = MaterialTheme.typography.titleSmall)
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                }
+            }
             importItems(importInfo)
             importInfo.counts?.waiting.orEmpty().takeIf { it.isNotEmpty() }?.let { waiting ->
                 item { SectionTitle("Fichiers en attente d'import", waiting.size) }
@@ -280,7 +297,10 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                     WaitingCard(
                         w, detail = importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)], selected = "w-${w.key}" in selected,
                         onLongClick = { if (w.trackingId != null) toggle("w-${w.key}") },
-                        onTap = { if (selected.isNotEmpty() && w.trackingId != null) toggle("w-${w.key}") },
+                        onTap = {
+                            if (selected.isNotEmpty()) { if (w.trackingId != null) toggle("w-${w.key}") }
+                            else if (w.trackingId != null && importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)]?.reason != null) resolving = w.trackingId to (importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)]?.seriesTitle ?: w.filename)
+                        },
                         onRetry = { path -> retryImportFile(api, path) { importInfo.reload() } },
                     )
                 }
@@ -313,12 +333,19 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         }) else null,
                     )
                 }
-                item { SectionTitle("En attente d'import", st.pending.size) }
-                if (st.pending.isEmpty()) item { Text("Rien en attente.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(st.pending, key = { "p-${it.id}" }) { p ->
+                // Les téléchargements dont le fichier est déjà sur le disque sont dans « Fichiers en attente
+                // d'import » en haut : ici seulement ceux qu'on n'y voit pas (fichiers pas encore là, etc.).
+                val onDisk = importInfo.counts?.waiting.orEmpty().mapNotNull { it.trackingId }.toSet()
+                val pendingOnly = st.pending.filter { it.id !in onDisk }
+                if (pendingOnly.isNotEmpty()) item { SectionTitle("En attente d'import", pendingOnly.size) }
+                items(pendingOnly, key = { "p-${it.id}" }) { p ->
                     PendingCard(
                         p, problem = importInfo.blocked[p.id], selected = "p-${p.id}" in selected,
-                        onLongClick = { toggle("p-${p.id}") }, onTap = { if (selected.isNotEmpty()) toggle("p-${p.id}") },
+                        onLongClick = { toggle("p-${p.id}") },
+                        onTap = {
+                            if (selected.isNotEmpty()) toggle("p-${p.id}")
+                            else if (importInfo.blocked[p.id] != null || p.exhausted || p.status == "failed") resolving = p.id to (p.seriesTitle ?: p.title)
+                        },
                         controllable = p.status == "pending" && p.client in CONTROLLABLE &&
                             (p.client == "telegram" || p.clientItemId != null),
                         busy = busy == p.id,
@@ -398,7 +425,7 @@ private fun PendingCard(p: PendingDownload, problem: String?, selected: Boolean,
             }
             Text(p.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            problem?.let { Text("$it · touchez pour corriger", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             val total = p.bytesTotal
             if (p.status == "pending" && total != null && total > 0) {
                 val done = (p.bytesDownloaded ?: 0L).toFloat() / total
@@ -484,7 +511,7 @@ private fun WaitingCard(
             Text(
                 when {
                     w.trackingId == null -> "Pas de téléchargement suivi : à traiter depuis la page Import du site"
-                    reason != null -> "Pas importé : $reason"
+                    reason != null -> "Pas importé : $reason · touchez pour corriger"
                     else -> "Prêt à importer"
                 },
                 style = MaterialTheme.typography.bodySmall,

@@ -78,7 +78,7 @@ fun parseRss(o: JSONObject): Pair<List<NewsItem>, List<String>> {
             subtitle = e.str("bedetheque_title") ?: e.str("series_title"),
             date = localDate(e.str("date")),
             source = e.str("feed_title") ?: e.str("feed_name"),
-            sizeBytes = null,
+            sizeBytes = e.long("size")?.takeIf { it > 0 },
             inLibrary = e.bool("already_in_library") == true,
             owned = e.bool("already_owned") == true,
             downloaded = e.bool("downloaded") == true,

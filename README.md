@@ -107,13 +107,19 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
   métadonnées Bédéthèque, scanner, supprimer. Le bouton **+** ajoute une série par son nom
   (recherche Bédéthèque). Dans une série, un appui long sur un tome ouvre ses actions (lire,
   hors ligne, chercher, éditer, actualiser, mettre à jour, supprimer) ; tri et filtre des tomes
-  en haut de la liste ; l'état « téléchargé » est indiqué sur chaque tome.
+  en haut de la liste ; l'état « téléchargé » est indiqué sur chaque tome, comme le badge des tomes améliorés (upscaling).
+  **Éditer le tome** reprend l'édition du site : changer le numéro (tome, intégrale, HS, épisode, suffixe Bis,
+  ou le numéro d'un autre tome de la série), modifier les métadonnées du CBZ, renommer le fichier (avec aperçu)
+  et déplacer le tome vers une autre série, dans l'emplacement choisi. Une série entière peut aussi changer de bibliothèque.
 - **Recherche** : toutes les sources, envoi au client de téléchargement.
 - **Suivi** : Activité (téléchargements, avec pause, reprise, « en premier » et suppression ;
   état de l'import en tête ; appui long pour sélectionner : supprimer, assigner ou corriger la série,
-  **import manuel** avec conversion des dossiers JPG en CBZ ; erreur affichée pour un dossier non importable),
-  Nouveautés (Tout, RSS, Telegram, EBDZ), Validation (choix manuels de l'acquisition automatique),
-  Historique (imports, téléchargements, actions, filtre par type). Des pastilles comptent les éléments en attente.
+  **import manuel** avec conversion des dossiers JPG en CBZ, lancé en arrière-plan ; erreur affichée pour un
+  dossier non importable, et toucher un album bloqué ouvre directement la correction de sa série),
+  Nouveautés (Tout, RSS, Telegram, EBDZ ; un même album publié à moins de 2 h d'écart est regroupé, avec la
+  taille des torrents), Validation (choix manuels de l'acquisition automatique, avec les auteurs de chaque série),
+  Historique (imports, téléchargements et toutes les actions du site : déplacements, fusions, changements de
+  numéro, suppressions… ; filtre par type). Des pastilles comptent les éléments en attente.
 - **Actions** : Enrichir (Indispensables BD, Panthéon, Thèmes, Top 100 BDGest, Par auteur), Surveillance (activer ou couper la
   surveillance d'une série), Vérification (rapports en lecture seule).
 - **Configuration** : Profil en premier (nom, avatar, mot de passe, déconnexion), Connexion (URL et clé API de l'app), puis les réglages de Bullarr
@@ -129,6 +135,14 @@ La barre du bas reprend les 5 rubriques de la barre latérale web :
   propre compte Komga. Le dernier onglet, Web,
   ouvre dans le navigateur ce qui n'est pas dans l'app : forums EBDZ, canaux Telegram,
   clé API, sauvegarde.
+
+Les actions longues (import manuel, déplacement, scan, mise à jour…) s'affichent au-dessus de la barre du bas
+tant qu'elles tournent : on sait ce qui se passe sans attendre la fin.
+
+Les liens du site Bullarr (série, tome, Activité, Validation…) s'ouvrent dans l'app, comme les liens
+`bullarr://`, ou quand on les partage vers l'app. Dans une série, **Plus → À lire aussi** propose des séries
+proches, avec un bouton Ajouter. Un compte lecteur peut « Demander ce tome » sur un tome manquant et suit l'état
+de sa demande.
 
 Dans Nouveautés, chaque ligne a un bouton Télécharger et un menu : ⚡ « Ajouter la série et
 télécharger » (comme sur la page web), ouvrir la série, ouvrir la source, copier le lien,
@@ -187,6 +201,7 @@ le téléphone, abonnez-vous au topic ntfy configuré dans l'app [ntfy](https://
 | Enrichir | `GET /api/bedetheque/indispensables`, `/api/bedetheque/pantheon`, `POST /api/bedetheque/add-series` |
 | Surveillance | `GET /api/missing-monitor/libraries`, `/api/missing-monitor/libraries/<id>/series`, `POST /api/missing-monitor/series/<id>/monitor` |
 | Vérification | `GET /api/settings/verification?type=…` |
+| Éditer le tome | `PUT /api/volumes/<id>/renumber`, `PUT /api/volumes/<id>/move-to-series`, `POST /api/series/<id>/rename/preview`, `POST /api/series/<id>/rename/execute`, `GET /api/series/<id>/volumes` |
 | Import (rafraîchi toutes les 5 s) | `GET /api/import/progress`, `GET /api/import/pending-count` |
 
 Les formats de réponse ont été relevés dans `blueprints/*/routes.py`. Les erreurs

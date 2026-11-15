@@ -268,7 +268,8 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
             .let { list -> if (tab == 0) list.sortedByDescending { it.date ?: "" } else list }
     }
 
-    val groups = remember(items) { groupConsecutiveSeries(items) }
+    // « si les mêmes albums apparaissent dans les 2 dernières heures, concatène-les » : comme le site.
+    val groups = remember(items) { groupConsecutiveSeries(gatherRecentSeries(items)) }
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
     Column(Modifier.fillMaxSize()) {
@@ -549,6 +550,45 @@ internal fun newsGroupKeys(item: NewsItem): Set<String> {
 }
 
 internal fun compactSeriesName(name: String): String = normalize(name).filter { it.isLetterOrDigit() }
+
+/** Date d'une entrée en minutes (« 2026-11-13 07:20 » ou « 2026-11-13T07:20 ») ; null sans heure. */
+internal fun newsMinutes(date: String?): Long? {
+    val d = date?.trim()?.replace('T', ' ')?.take(16) ?: return null
+    return runCatching {
+        java.time.LocalDateTime.parse(d, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            .toEpochSecond(java.time.ZoneOffset.UTC) / 60
+    }.getOrNull()
+}
+
+private const val GATHER_WINDOW_MINUTES = 120L
+
+/**
+ * Liste triée par date : chaque album entraîne juste derrière lui les albums suivants de la même
+ * série publiés à moins de 2 h du dernier album rapproché, même entrecoupés d'autres séries ; l'ordre relatif du reste
+ * ne change pas. Une date manquante ne rapproche rien.
+ */
+internal fun gatherRecentSeries(items: List<NewsItem>): List<NewsItem> {
+    val times = items.map { newsMinutes(it.date) }
+    val keys = items.map { newsGroupKeys(it) }
+    val used = BooleanArray(items.size)
+    val out = ArrayList<NewsItem>(items.size)
+    for (i in items.indices) {
+        if (used[i]) continue
+        used[i] = true
+        out.add(items[i])
+        var t = times[i] ?: continue
+        if (keys[i].isEmpty()) continue
+        val groupKeys = keys[i].toMutableSet()
+        for (j in i + 1 until items.size) {
+            val tj = times[j] ?: break
+            // Fenêtre glissante : mesurée depuis le dernier album rapproché (T9 20:03, T8 19:01,
+            // T7 18:40, T6 17:20 vont ensemble), pas seulement depuis le premier.
+            if (kotlin.math.abs(t - tj) > GATHER_WINDOW_MINUTES) break
+            if (!used[j] && keys[j].any { it in groupKeys }) { used[j] = true; out.add(items[j]); groupKeys.addAll(keys[j]); t = tj }
+        }
+    }
+    return out
+}
 
 /** Regroupe les entrées CONSÉCUTIVES d'une même série ; un album d'une autre série coupe le groupe. */
 internal fun groupConsecutiveSeries(items: List<NewsItem>): List<List<NewsItem>> {

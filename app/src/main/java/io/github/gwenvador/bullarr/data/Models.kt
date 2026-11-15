@@ -267,6 +267,12 @@ data class VolumeRow(
     /** Travail d'upscaling / réduction du tome : queued, running, done, error, cancelled. */
     val upscaleStatus: String? = null,
     val upscaleModel: String? = null,
+    /** Tome passé en HD sur le serveur (fichier inchangé depuis) : libellé du modèle et date. */
+    val upscaled: Boolean = false,
+    val upscaledModel: String? = null,
+    val upscaledAt: String? = null,
+    /** Dernière demande de ce tome par le compte connecté : pending, searching, rejected (null : aucune). */
+    val requested: String? = null,
 ) {
     val pageSide: Int get() = maxOf(pageWidth ?: 0, pageHeight ?: 0)
     val upscaleBusy: Boolean get() = upscaleStatus == "queued" || upscaleStatus == "running"
@@ -296,6 +302,7 @@ data class SeriesDetail(
     val toReadLater: Boolean,
     val isFavorite: Boolean,
     val volumes: List<VolumeRow>,
+    val libraryId: Int? = null,
 )
 
 fun parseSeriesDetail(o: JSONObject): SeriesDetail {
@@ -338,12 +345,17 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
             backupKind = v.str("backup_kind"),
             upscaleStatus = v.str("upscale_status"),
             upscaleModel = v.str("upscale_model"),
+            upscaled = v.optJSONObject("upscaled") != null,
+            upscaledModel = v.optJSONObject("upscaled")?.str("model"),
+            upscaledAt = v.optJSONObject("upscaled")?.str("at"),
+            requested = v.str("requested"),
         )
     }
     return SeriesDetail(
         id = o.int("id") ?: -1,
         title = o.str("title") ?: "(sans titre)",
         libraryName = o.optJSONObject("library")?.str("name"),
+        libraryId = o.optJSONObject("library")?.int("id"),
         coverPath = coverOf(o) ?: bd.str("cover_path") ?: o.optJSONObject("komga")?.str("cover_path"),
         summary = o.str("manual_summary") ?: bd.str("description") ?: o.str("local_summary"),
         status = o.str("manual_status") ?: bd.str("status"),

@@ -9,6 +9,19 @@ import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.LocalLibrary
+import androidx.compose.material.icons.outlined.Radar
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.CallMerge
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.sp
@@ -92,7 +105,23 @@ private fun kindIcon(kind: String) = when (kind) {
     "Tome trouvé" -> Icons.Outlined.TaskAlt
     "Acquisition auto" -> Icons.Outlined.Bolt
     "Tome supprimé" -> Icons.Outlined.Delete
-    "Tome déplacé" -> Icons.Outlined.DriveFileMove
+    "Tome déplacé", "Déplacement de série" -> Icons.Outlined.DriveFileMove
+    "Fusion" -> Icons.Outlined.CallMerge
+    "Changement de numéro", "Tags" -> Icons.Outlined.Tag
+    "Suppression", "Téléchargement retiré" -> Icons.Outlined.Delete
+    "Contrôle de téléchargement" -> Icons.Outlined.Pause
+    "Validation" -> Icons.Outlined.CheckBox
+    "Bibliothèque" -> Icons.Outlined.LocalLibrary
+    "Scan" -> Icons.Outlined.Radar
+    "Modification de série" -> Icons.Outlined.Edit
+    "Métadonnées" -> Icons.Outlined.Storage
+    "Listes de lecture" -> Icons.AutoMirrored.Outlined.List
+    "Lecture" -> Icons.AutoMirrored.Outlined.MenuBook
+    "Export" -> Icons.Outlined.Inventory2
+    "Association" -> Icons.Outlined.Link
+    "Surveillance" -> Icons.Outlined.Visibility
+    "Scrap des sources" -> Icons.Outlined.Autorenew
+    "Réglages" -> Icons.Outlined.Settings
     "Conversion" -> Icons.Outlined.Autorenew
     "IA" -> Icons.Outlined.AutoAwesome
     "Comptes" -> Icons.Outlined.Person
@@ -106,11 +135,11 @@ private val HISTORY_GROUPS = listOf("Imports", "Téléchargements", "Recherches"
 /** Filtre du site auquel appartient un type de ligne (null : seulement dans « Tous »). */
 private fun historyGroup(kind: String): String? = when (kind) {
     "Import" -> "Imports"
-    "Téléchargement" -> "Téléchargements"
+    "Téléchargement", "Contrôle de téléchargement", "Téléchargement retiré" -> "Téléchargements"
     "Recherche", "Acquisition auto" -> "Recherches"
     "Renommage" -> "Renommages"
     "Conversion" -> "Conversions"
-    "Tome supprimé" -> "Suppressions"
+    "Tome supprimé", "Suppression" -> "Suppressions"
     "IA" -> "IA"
     "Demande" -> "Demandes"
     "Comptes", "Utilisateur" -> "Utilisateurs"
@@ -346,7 +375,14 @@ private fun statusFr(s: String?): String? = s?.let { STATUS_LABELS[it.lowercase(
 private val ACTION_LABELS = mapOf(
     "search" to "Recherche", "rename" to "Renommage", "add_series" to "Série ajoutée",
     "missing_volume_match" to "Tome trouvé", "auto_acquire" to "Acquisition auto",
-    "delete_volume" to "Tome supprimé", "move_volume" to "Tome déplacé", "convert" to "Conversion",
+    "delete_volume" to "Tome supprimé", "move_volume" to "Tome déplacé", "move_series" to "Déplacement de série",
+    "merge" to "Fusion", "renumber_volume" to "Changement de numéro", "delete" to "Suppression",
+    "import" to "Import", "download" to "Téléchargement",
+    // Types ajoutés quand toutes les actions sont passées dans l'historique (mêmes libellés que le site).
+    "download_control" to "Contrôle de téléchargement", "download_remove" to "Téléchargement retiré", "review" to "Validation",
+    "library" to "Bibliothèque", "scan" to "Scan", "series_edit" to "Modification de série", "metadata" to "Métadonnées",
+    "tags" to "Tags", "reading_list" to "Listes de lecture", "read" to "Lecture", "export" to "Export", "match" to "Association",
+    "monitor" to "Surveillance", "scrape" to "Scrap des sources", "settings" to "Réglages", "convert" to "Conversion",
     "quality_upgrade" to "Upgrade qualité", "request" to "Demande", "user" to "Utilisateur", "ai" to "IA",
 )
 

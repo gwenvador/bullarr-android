@@ -105,6 +105,13 @@ fun ValidationScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit = { i
                             )
                             Column(Modifier.weight(1f)) {
                                 Text(first.str("series_title") ?: "(série inconnue)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                // Auteurs Bédéthèque (comme le site) : un même nom une seule fois.
+                                val authors = listOfNotNull(first.str("bedetheque_scenaristes"), first.str("bedetheque_dessinateurs"))
+                                    .flatMap { it.split(Regex("""\s*,\s*""")) }.filter { it.isNotBlank() }.distinct().joinToString(", ")
+                                if (authors.isNotEmpty()) Text(
+                                    authors, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                )
                                 val labels = entries.mapNotNull { it.str("volume_label") }
                                 val sub = if (entries.size == 1) listOfNotNull(labels.firstOrNull(), "$candidateCount candidat(s)")
                                 else listOf("${entries.size} tomes", "$candidateCount candidat(s)")

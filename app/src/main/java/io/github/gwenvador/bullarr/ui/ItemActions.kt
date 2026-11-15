@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -54,6 +55,21 @@ object ItemActions {
         api.postObject("api/scan/series/$id", JSONObject())
     }
     suspend fun deleteSeries(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int) { api.deleteObject("api/series/$id") }
+    /** POST /api/series/move puis suivi du travail (GET /api/series/move/<job>) jusqu'à la fin ; renvoie le message à afficher. */
+    suspend fun moveSeries(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int, target: io.github.gwenvador.bullarr.data.Library): String {
+        val started = api.postObject("api/series/move", JSONObject().put("library_id", target.id).put("series_ids", org.json.JSONArray().put(id)))
+        if (!started.optBoolean("success", true)) throw io.github.gwenvador.bullarr.data.ApiException(started.str("error") ?: "Déplacement impossible")
+        val jobId = started.str("job_id") ?: throw io.github.gwenvador.bullarr.data.ApiException("Déplacement impossible")
+        while (true) {
+            kotlinx.coroutines.delay(1500)
+            val job = api.getObject("api/series/move/$jobId").optJSONObject("job") ?: throw io.github.gwenvador.bullarr.data.ApiException("Suivi du déplacement perdu")
+            if (job.str("status") == "running") continue
+            if (job.str("status") == "failed") throw io.github.gwenvador.bullarr.data.ApiException(job.str("error") ?: "Déplacement interrompu")
+            val r = job.optJSONArray("results")?.optJSONObject(0)
+            if (r != null && !r.optBoolean("success")) throw io.github.gwenvador.bullarr.data.ApiException("Non déplacée : " + (r.str("error") ?: "erreur inconnue"))
+            return if (r?.optBoolean("skipped") == true) "Série déjà dans ${target.name}" else "Série déplacée vers ${target.name}"
+        }
+    }
     suspend fun updateVolumeMetadata(api: io.github.gwenvador.bullarr.data.BullarrApi, id: Int) {
         api.postObject("api/bedetheque/update-metadata/volume/$id", JSONObject())
     }
@@ -91,15 +107,65 @@ object ItemActions {
  * Lance [block] avec un message de réussite ou l'erreur lisible en toast ; [then] s'exécute dans les deux cas
  * (rechargement des données).
  */
-fun launchAction(scope: CoroutineScope, context: android.content.Context, ok: String, then: () -> Unit = {}, block: suspend () -> Unit) {
+fun launchAction(
+    scope: CoroutineScope, context: android.content.Context, ok: String, then: () -> Unit = {},
+    running: String = "Action en cours", block: suspend () -> Unit,
+) {
     scope.launch {
+        val id = RunningActions.start(running)
         try {
             block()
             Toast.makeText(context, ok, Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(context, e.readable(), Toast.LENGTH_LONG).show()
+        } finally {
+            RunningActions.end(id)
         }
         then()
+    }
+}
+
+/**
+ * Actions en cours (suppression, scan, déplacement…) : un bandeau en bas de l'écran les liste tant
+ * qu'elles tournent, pour savoir ce qui se passe avant le message de fin.
+ */
+object RunningActions {
+    data class Item(val id: Long, val label: String, val startedAt: Long = System.currentTimeMillis())
+    val items = androidx.compose.runtime.mutableStateListOf<Item>()
+    private var next = 0L
+    fun start(label: String): Long { val id = ++next; items.add(Item(id, label)); return id }
+    fun end(id: Long) { items.removeAll { it.id == id } }
+    /** Exécute [block] en l'affichant dans le bandeau. */
+    suspend fun <T> track(label: String, block: suspend () -> T): T {
+        val id = start(label)
+        try { return block() } finally { end(id) }
+    }
+}
+
+/** Bandeau des actions en cours ; une action n'y apparaît qu'au-delà d'une demi-seconde (pas de clignotement). */
+@Composable
+fun RunningActionsBanner(modifier: Modifier = Modifier) {
+    // Horloge : se met à jour tant qu'une action tourne, pour faire apparaître celles qui durent.
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    val items = RunningActions.items.toList()
+    androidx.compose.runtime.LaunchedEffect(items.isNotEmpty()) {
+        while (RunningActions.items.isNotEmpty()) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(200) }
+    }
+    val visible = items.filter { now - it.startedAt >= 500 }
+    if (visible.isEmpty()) return
+    androidx.compose.material3.Surface(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.medium, tonalElevation = 6.dp, shadowElevation = 6.dp,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            visible.forEach { item ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text("${item.label}…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+        }
     }
 }
 

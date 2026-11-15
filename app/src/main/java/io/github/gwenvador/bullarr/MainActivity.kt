@@ -79,11 +79,38 @@ class MainActivity : ComponentActivity() {
         io.github.gwenvador.bullarr.ui.ThemePref.init(this)
         setContent { BullarrTheme { BullarrApp() } }
         handleAuthIntent(intent)
+        handleLinkIntent(intent)
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         handleAuthIntent(intent)
+        handleLinkIntent(intent)
+    }
+
+    /**
+     * Lien d'une page du site : partagé vers l'app (« Partager → Bullarr », texte contenant l'adresse)
+     * ou ouvert en bullarr://series/12. Aucune adresse de serveur n'est écrite dans l'APK.
+     */
+    private fun handleLinkIntent(intent: android.content.Intent?) {
+        intent ?: return
+        val uri: android.net.Uri = when (intent.action) {
+            android.content.Intent.ACTION_SEND -> {
+                val text = intent.getStringExtra(android.content.Intent.EXTRA_TEXT) ?: return
+                val url = Regex("""(https?|bullarr)://\S+""").find(text)?.value ?: run {
+                    android.widget.Toast.makeText(this, "Aucun lien dans le texte partagé", android.widget.Toast.LENGTH_SHORT).show(); return
+                }
+                android.net.Uri.parse(url)
+            }
+            android.content.Intent.ACTION_VIEW -> intent.data?.takeIf { !(it.scheme == "bullarr" && it.host == "auth") } ?: return
+            else -> return
+        }
+        val vm = androidx.lifecycle.ViewModelProvider(this)[io.github.gwenvador.bullarr.ui.AppViewModel::class.java]
+        if (vm.api == null) {
+            android.widget.Toast.makeText(this, "Connectez-vous d'abord à votre serveur Bullarr", android.widget.Toast.LENGTH_LONG).show(); return
+        }
+        vm.openWebLink(uri)?.let { android.widget.Toast.makeText(this, it, android.widget.Toast.LENGTH_LONG).show() }
+        intent.action = null; intent.data = null
     }
 
     /** Retour du SSO par navigateur : bullarr://auth?code=… */
@@ -134,6 +161,8 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
+                androidx.compose.foundation.layout.Column {
+                io.github.gwenvador.bullarr.ui.RunningActionsBanner()
                 NavigationBar {
                     vm.sections().forEach { s ->
                         NavigationBarItem(
@@ -148,6 +177,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                             label = { Text(s.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp) },
                         )
                     }
+                }
                 }
             },
         ) { pad ->
