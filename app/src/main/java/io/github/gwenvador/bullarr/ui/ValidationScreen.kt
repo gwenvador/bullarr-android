@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -56,6 +58,7 @@ fun ValidationScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit = { i
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
     // Séries dépliées (repliées par défaut) : l'en-tête suffit pour parcourir la liste.
     var expanded by remember { mutableStateOf(setOf<String>()) }
     // Une entrée par série : tous ses tomes à valider y sont regroupés, dans l'ordre de la liste.
@@ -121,6 +124,16 @@ fun ValidationScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit = { i
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 )
                             }
+                            // Lien vers la série : sa fiche dans l'app, ou sa fiche Bédéthèque si elle n'est pas encore en bibliothèque.
+                            val sid = first.int("series_id")?.takeIf { it != 0 }
+                            val bdUrl = if (sid == null) entries.firstNotNullOfOrNull { r ->
+                                r.optJSONArray("candidates").objects().firstNotNullOfOrNull { it.str("bedetheque_url")?.takeIf { u -> u.startsWith("http") } }
+                            } else null
+                            if (sid != null) IconButton(onClick = { onOpenSeries(sid, first.str("series_title") ?: "") }) {
+                                Icon(Icons.Outlined.CollectionsBookmark, contentDescription = "Ouvrir la série")
+                            } else if (bdUrl != null) IconButton(onClick = { runCatching { uri.openUri(bdUrl) } }) {
+                                Icon(Icons.Outlined.OpenInNew, contentDescription = "Fiche Bédéthèque")
+                            }
                             IconButton(onClick = {
                                 ignore(entries.mapNotNull { it.int("id") }, if (entries.size > 1) "Série ignorée (${entries.size} tomes)" else "Ignoré")
                             }) { Icon(Icons.Outlined.Close, contentDescription = if (entries.size > 1) "Ignorer tous les tomes de cette série" else "Ignorer cette validation") }
@@ -151,6 +164,7 @@ fun ValidationScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit = { i
 @Composable
 private fun ReviewEntry(r: JSONObject, showHeader: Boolean, sending: Set<Pair<Int, Int>>, onIgnore: (Int) -> Unit, onDownload: (Int, Int) -> Unit) {
     val id = r.int("id") ?: return
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val candidates = r.optJSONArray("candidates") ?: JSONArray()
     if (showHeader) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -172,6 +186,11 @@ private fun ReviewEntry(r: JSONObject, showHeader: Boolean, sending: Set<Pair<In
                     c.str("seeders")?.let { "$it seeds" },
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // Page d'origine du fichier (fil EBDZ, page de l'indexeur…), comme le bouton Source du site.
+            val source = listOf("thread_url", "info_url", "source_link", "link").firstNotNullOfOrNull { k -> c.str(k)?.takeIf { it.startsWith("http") } }
+            if (source != null) IconButton(onClick = { runCatching { uri.openUri(source) } }) {
+                Icon(Icons.Outlined.OpenInNew, contentDescription = "Ouvrir la source")
             }
             if (id to idx in sending) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 androidx.compose.material3.CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)

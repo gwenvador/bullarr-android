@@ -378,23 +378,45 @@ fun ThemePicker(modifier: Modifier = Modifier) {
 
 @Composable
 fun ErrorCard(message: String, modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ),
+    // Discret partout (plus de grand bloc rouge) : icône et première ligne en couleur d'erreur,
+    // le détail (route appelée, piste de résolution) se déplie d'un appui.
+    var open by androidx.compose.runtime.saveable.rememberSaveable(message) { androidx.compose.runtime.mutableStateOf(false) }
+    val lines = message.trim().lines().filter { it.isNotBlank() }
+    val head = lines.firstOrNull() ?: "Erreur"
+    val more = message.trim().length > head.length || head.length > 90
+    Row(
+        modifier.fillMaxWidth().clickable(enabled = more) { open = !open }.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
-            Icon(Icons.Outlined.ErrorOutline, contentDescription = null)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(message, style = MaterialTheme.typography.bodyMedium)
-                if (onRetry != null) {
-                    TextButton(onClick = onRetry, modifier = Modifier.padding(top = 4.dp)) { Text("Réessayer") }
-                }
-            }
+        Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (open) message.trim() else head, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error, maxLines = if (open) Int.MAX_VALUE else 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (more && !open) Text("Détails", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (onRetry != null) TextButton(onClick = onRetry) { Text("Réessayer") }
+    }
+}
+
+/** Erreur discrète sur une ligne (rafraîchissement raté alors que l'écran a déjà ses données) ; un appui montre le détail. */
+@Composable
+fun InlineError(message: String, detail: String? = null, onRetry: (() -> Unit)? = null) {
+    var open by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().clickable { open = !open; if (!open) onRetry?.invoke() }.padding(vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
+        if (open && detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 22.dp, top = 2.dp))
     }
 }
 

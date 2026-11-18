@@ -89,6 +89,13 @@ data class PendingDownload(
     val createdAt: String?,
     val localCopy: String?,
     val clientItemId: String?,
+    val seriesId: Int? = null,
+    /** Fichier arrivé dont le numéro n'a pu être identifié : correction manuelle (comme « Tome à préciser » du site). */
+    val needsVolume: Boolean = false,
+    /** Aucune série rattachée : correction manuelle (« Série à préciser »). */
+    val needsSeries: Boolean = false,
+    /** Pack entièrement traité, en attente de la clôture automatique : rien à faire. */
+    val awaitingClosure: Boolean = false,
 )
 
 data class ActivityStatus(val clients: List<ClientStatus>, val pending: List<PendingDownload>)
@@ -134,6 +141,10 @@ fun parseActivity(o: JSONObject): ActivityStatus {
             createdAt = p.str("created_at"),
             localCopy = localCopy,
             clientItemId = p.str("client_item_id"),
+            seriesId = p.int("series_id")?.takeIf { it != 0 },
+            needsVolume = p.bool("needs_volume_correction") == true,
+            needsSeries = p.bool("needs_series_correction") == true,
+            awaitingClosure = p.bool("awaiting_closure") == true,
         )
     }
     return ActivityStatus(clients, pending)

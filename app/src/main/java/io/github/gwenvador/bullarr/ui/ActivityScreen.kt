@@ -20,6 +20,9 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -90,6 +93,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     val api = vm.api ?: return
     var status by remember { mutableStateOf<ActivityStatus?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var failures by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
@@ -98,13 +102,34 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     suspend fun refresh() {
         try {
             status = parseActivity(api.getObject("api/activity/status"))
-            error = null
+            error = null; failures = 0
         } catch (e: Exception) {
-            error = e.readable()
+            // Une coupure passagère (toutes les 4 s) ne doit pas faire clignoter une erreur.
+            failures++
+            if (failures >= 2 || status == null) error = e.readable()
         }
     }
     Polling(4000, api) { refresh() }
 
+    // Fichier en attente à supprimer du disque : nom affiché, chemin sur le serveur.
+    var fileToDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
+    fileToDelete?.let { (name, path) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { fileToDelete = null },
+            title = { Text("Supprimer ce fichier ?") },
+            text = { Text("$name\n\nIl est effacé du dossier d'import, sans être importé.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    fileToDelete = null
+                    scope.launch {
+                        try { deleteWaitingFile(api, path); snackbar.showSnackbar("Fichier supprimé"); importInfo.reload() }
+                        catch (e: Exception) { snackbar.showSnackbar(e.readable()) }
+                    }
+                }) { Text("Supprimer") }
+            },
+            dismissButton = { TextButton(onClick = { fileToDelete = null }) { Text("Annuler") } },
+        )
+    }
     var toDelete by remember { mutableStateOf<Pair<String, suspend () -> Unit>?>(null) }
     toDelete?.let { (label, run) ->
         androidx.compose.material3.AlertDialog(
@@ -175,6 +200,13 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     var addingFor by remember { mutableStateOf<List<Int>>(emptyList()) }
     // Appui sur un album dont l'import échoue : ouvre directement la résolution (série / tome / import).
     var resolving by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    // « Tome à préciser » : la série est connue, on la présélectionne et on ne demande que le numéro.
+    // Sections repliables (gardées tant que l'écran existe).
+    var hidePending by rememberSaveable { mutableStateOf(false) }
+    var hideActive by rememberSaveable { mutableStateOf(false) }
+    var resolvingHint by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    // Fichier en attente d'import à corriger seul (un pack en contient plusieurs : ne pas toucher au suivi commun).
+    var resolvingFile by remember { mutableStateOf<Pair<String, WaitingDetail>?>(null) }
     fun assign(seriesId: Int, target: VolumeTarget?, only: List<Int>? = null, importNow: Boolean = false) {
         val ids = only ?: selected.mapNotNull { trackers[it] }
         selected = emptyList()
@@ -211,7 +243,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
         val tid = w.trackingId ?: return@forEach
         trackers["w-${w.key}"] = tid
         names["w-${w.key}"] = w.filename
-        deleters["w-${w.key}"] = { deleteWaitingFile(api, tid) }
+        importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)]?.filepath?.let { path -> deleters["w-${w.key}"] = { deleteWaitingFile(api, path) } }
     }
     if (confirmImport) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmImport = false },
@@ -231,9 +263,18 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     )
     if (assigning) AssignSeriesDialog(vm, selected.count { it in trackers }, guessSeriesName(selected.firstOrNull()?.let { names[it] }), onDismiss = { assigning = false }, onAddNew = { addingFor = selected.mapNotNull { trackers[it] }; adding = true }, onPick = { sid, vol, now -> assign(sid, vol, importNow = now) })
     resolving?.let { (tid, name) ->
+        val file = resolvingFile
         AssignSeriesDialog(vm, 1, guessSeriesName(name), onDismiss = { resolving = null },
+            title = "Assigner", initialSeriesId = resolvingHint?.first?.takeIf { it > 0 },
+            fileName = file?.first ?: name,
+            fileTitle = (file?.first ?: name).substringBeforeLast('.').substringBefore(" - "),
+            importOnly = file != null,
             onAddNew = { addingFor = listOf(tid); resolving = null; adding = true },
-            onPick = { sid, vol, now -> resolving = null; assign(sid, vol, only = listOf(tid), importNow = now) })
+            onPick = { sid, vol, now ->
+                resolving = null
+                if (file != null) runImport { manualImport(api, setOf(tid), vol, onlyPath = file.second.filepath, seriesId = sid) }
+                else assign(sid, vol, only = listOf(tid), importNow = now)
+            })
     }
     if (adding) SeriesAddDialog(vm, onDismiss = { adding = false }, initialQuery = guessSeriesName((selected.firstOrNull()?.let { names[it] }) ?: addingFor.firstOrNull()?.let { t -> names.entries.firstOrNull { trackers[it.key] == t }?.value }), onAdded = { sid, _ -> assign(sid, null, addingFor) })
     if (confirmBatch) androidx.compose.material3.AlertDialog(
@@ -299,23 +340,80 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         onLongClick = { if (w.trackingId != null) toggle("w-${w.key}") },
                         onTap = {
                             if (selected.isNotEmpty()) { if (w.trackingId != null) toggle("w-${w.key}") }
-                            else if (w.trackingId != null && importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)]?.reason != null) resolving = w.trackingId to (importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)]?.seriesTitle ?: w.filename)
+                            else {
+                                val d = importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)]
+                                if (w.trackingId != null && d != null) {
+                                    // Série déjà validée : présélectionnée, il ne reste qu'à choisir le tome de CE fichier.
+                                    resolvingHint = d.seriesId?.let { it to "Assigner" }
+                                    resolvingFile = if (d.filepath != null) w.filename to d else null
+                                    resolving = w.trackingId to (d.seriesTitle ?: w.filename)
+                                }
+                            }
                         },
                         onRetry = { path -> retryImportFile(api, path) { importInfo.reload() } },
+                        onImport = { d ->
+                            val tid = w.trackingId ?: return@WaitingCard
+                            runImport { manualImport(api, setOf(tid), onlyPath = d.filepath) }
+                        },
+                        onFix = { d ->
+                            val tid = w.trackingId ?: return@WaitingCard
+                            resolvingHint = d.seriesId?.let { it to "Assigner" }
+                            resolvingFile = if (d.filepath != null) w.filename to d else null
+                            resolving = tid to (d.seriesTitle ?: w.filename)
+                        },
+                        onDelete = { d -> d.filepath?.let { fileToDelete = w.filename to it } },
                     )
                 }
             }
-            error?.let { item { ErrorCard(it, onRetry = { scope.launch { refresh() } }) } }
+            // Données déjà affichées : simple ligne discrète ; grosse carte seulement si rien n'a pu être chargé.
+            error?.let { e ->
+                item {
+                    if (status != null) InlineError("Connexion perdue · nouvel essai automatique", detail = e) { scope.launch { refresh() } }
+                    else ErrorCard(e, onRetry = { scope.launch { refresh() } })
+                }
+            }
             val st = status
             if (st == null && error == null) item { EmptyState("Chargement…") }
             if (st != null) {
                 val active = st.clients.flatMap { c -> c.items.map { c to it } }
                 st.clients.filter { it.error != null }.forEach { c ->
-                    item { ErrorCard("${c.label} : ${c.error}") }
+                    item { InlineError("${c.label} injoignable", detail = c.error) }
                 }
-                item { SectionTitle("En cours", active.size) }
-                if (active.isEmpty()) item { Text("Aucun téléchargement actif chez les clients.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(active, key = { "a-${it.first.client}-${it.second.clientId ?: it.second.name}" }) { (c, item) ->
+                // Les téléchargements dont le fichier est déjà sur le disque sont dans « Fichiers en attente
+                // d'import » en haut : ici seulement ceux qu'on n'y voit pas (fichiers pas encore là, etc.).
+                val onDisk = importInfo.counts?.waiting.orEmpty().mapNotNull { it.trackingId }.toSet()
+                // Ceux qui attendent une action de notre part d'abord.
+                val pendingOnly = st.pending.filter { it.id !in onDisk }.sortedByDescending { pendingTodo(it, importInfo.blocked[it.id]) != null }
+                if (pendingOnly.isNotEmpty()) item { SectionTitle("En attente d'import", pendingOnly.size, open = !hidePending, onToggle = { hidePending = !hidePending }) }
+                items(if (hidePending) emptyList() else pendingOnly, key = { "p-${it.id}" }) { p ->
+                    PendingCard(
+                        p, problem = importInfo.blocked[p.id], selected = "p-${p.id}" in selected,
+                        onLongClick = { toggle("p-${p.id}") },
+                        onTap = {
+                            if (selected.isNotEmpty()) toggle("p-${p.id}")
+                            else if (pendingTodo(p, importInfo.blocked[p.id]) != null) {
+                                resolvingHint = when {
+                                    p.status == "completed" && p.needsVolume && p.seriesId != null -> p.seriesId to "Préciser le tome"
+                                    p.status == "completed" && p.needsVolume -> -1 to "Préciser la série et le tome"
+                                    p.status == "completed" && p.needsSeries -> -1 to "Préciser la série"
+                                    else -> null
+                                }
+                                resolvingFile = null
+                                resolving = p.id to (p.seriesTitle ?: p.title)
+                            }
+                        },
+                        controllable = p.status == "pending" && p.client in CONTROLLABLE &&
+                            (p.client == "telegram" || p.clientItemId != null),
+                        busy = busy == p.id,
+                        onAction = { a -> control(p.id, a) },
+                        onDelete = {
+                            toDelete = p.title to suspend { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit }
+                        },
+                    )
+                }
+                item { SectionTitle("En cours", active.size, open = !hideActive, onToggle = { hideActive = !hideActive }) }
+                if (active.isEmpty() && !hideActive) item { Text("Aucun téléchargement actif chez les clients.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                items(if (hideActive) emptyList() else active, key = { "a-${it.first.client}-${it.second.clientId ?: it.second.name}" }) { (c, item) ->
                     val key = "a-${c.client}-${item.clientId ?: item.name}"
                     DownloadCard(
                         item, c.label, selected = key in selected,
@@ -333,39 +431,27 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         }) else null,
                     )
                 }
-                // Les téléchargements dont le fichier est déjà sur le disque sont dans « Fichiers en attente
-                // d'import » en haut : ici seulement ceux qu'on n'y voit pas (fichiers pas encore là, etc.).
-                val onDisk = importInfo.counts?.waiting.orEmpty().mapNotNull { it.trackingId }.toSet()
-                val pendingOnly = st.pending.filter { it.id !in onDisk }
-                if (pendingOnly.isNotEmpty()) item { SectionTitle("En attente d'import", pendingOnly.size) }
-                items(pendingOnly, key = { "p-${it.id}" }) { p ->
-                    PendingCard(
-                        p, problem = importInfo.blocked[p.id], selected = "p-${p.id}" in selected,
-                        onLongClick = { toggle("p-${p.id}") },
-                        onTap = {
-                            if (selected.isNotEmpty()) toggle("p-${p.id}")
-                            else if (importInfo.blocked[p.id] != null || p.exhausted || p.status == "failed") resolving = p.id to (p.seriesTitle ?: p.title)
-                        },
-                        controllable = p.status == "pending" && p.client in CONTROLLABLE &&
-                            (p.client == "telegram" || p.clientItemId != null),
-                        busy = busy == p.id,
-                        onAction = { a -> control(p.id, a) },
-                        onDelete = {
-                            toDelete = p.title to suspend { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit }
-                        },
-                    )
-                }
             }
         }
     }
 }
 
 @Composable
-private fun SectionTitle(text: String, count: Int) {
-    Text(
-        "$text ($count)", style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(top = 8.dp),
-    )
+private fun SectionTitle(text: String, count: Int, open: Boolean? = null, onToggle: () -> Unit = {}) {
+    if (open == null) {
+        Text("$text ($count)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp).clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$text ($count)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Icon(
+            if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            contentDescription = if (open) "Replier" else "Déplier",
+        )
+    }
 }
 
 private fun isPausedState(state: String?): Boolean {
@@ -420,12 +506,26 @@ private fun PendingCard(p: PendingDownload, problem: String?, selected: Boolean,
                     listOfNotNull(p.seriesTitle, p.volume.ifBlank { null }).joinToString(" · ").ifBlank { p.title },
                     style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 )
-                val (label, icon, tint) = if (problem != null) Triple("Import impossible", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error) else statusLabel(p)
+                val (label, icon, tint) = when {
+                    problem != null -> Triple("Import impossible", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error)
+                    p.status == "completed" && p.needsVolume && p.needsSeries -> Triple("Série et tome à préciser", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error)
+                    p.status == "completed" && p.needsVolume -> Triple("Tome à préciser", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error)
+                    p.status == "completed" && p.needsSeries -> Triple("Série à préciser", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error)
+                    p.exhausted || p.status == "failed" -> Triple("Échec", Icons.Outlined.ErrorOutline, MaterialTheme.colorScheme.error)
+                    else -> statusLabel(p)
+                }
                 StatusIcon(icon, label, tint, 22.dp)
             }
             Text(p.title, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            problem?.let { Text("$it · touchez pour corriger", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            // Ce que Bullarr attend de nous, en clair (ou qu'il n'y a rien à faire).
+            val todo = pendingTodo(p, problem)
+            Text(
+                todo?.let { "À faire : $it" } ?: pendingNothingToDo(p),
+                style = MaterialTheme.typography.bodySmall, fontWeight = if (todo != null) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (todo != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             val total = p.bytesTotal
             if (p.status == "pending" && total != null && total > 0) {
                 val done = (p.bytesDownloaded ?: 0L).toFloat() / total
@@ -434,7 +534,6 @@ private fun PendingCard(p: PendingDownload, problem: String?, selected: Boolean,
             val parts = listOfNotNull(
                 if (total != null && total > 0) "${formatBytes(p.bytesDownloaded) ?: "0"} / ${formatBytes(total)}" else null,
                 if (p.isPack) "pack" else null,
-                when (p.localCopy) { "present" -> "fichiers arrivés"; "settling" -> "copie en cours"; "absent" -> "fichiers pas encore là"; else -> null },
                 if (p.exhausted) "tentatives épuisées" else null,
                 p.createdAt?.take(16),
             )
@@ -443,11 +542,34 @@ private fun PendingCard(p: PendingDownload, problem: String?, selected: Boolean,
                     Logo(logoKey(c), c, 20.dp)
                     if (!hasLogo(logoKey(c))) Text(c, style = MaterialTheme.typography.bodySmall)
                 }
-                Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+                Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                // Sans pause ni reprise, la corbeille tient sur la ligne du client, à droite.
+                if (!controllable && onDelete != null) DeleteButton(busy, onDelete)
             }
-            Controls(paused = p.paused, busy = busy, onAction = onAction, controllable = controllable, onDelete = onDelete)
+            if (controllable) Controls(paused = p.paused, busy = busy, onAction = onAction, controllable = true, onDelete = onDelete)
         }
     }
+}
+
+/** Action attendue de l'utilisateur pour ce téléchargement, ou null s'il n'y a rien à faire (mêmes cas que le site). */
+private fun pendingTodo(p: PendingDownload, problem: String?): String? = when {
+    problem != null -> "touchez pour corriger la série et le tome, ou sélectionnez-le pour l'import manuel."
+    p.status == "completed" && p.needsVolume && p.needsSeries ->
+        "ni la série ni le numéro du tome n'ont été reconnus. Touchez pour choisir la série (ou la créer) et indiquer le numéro."
+    p.status == "completed" && p.needsVolume -> "le numéro du tome n'a pas été reconnu. Touchez pour l'indiquer."
+    p.status == "completed" && p.needsSeries -> "aucune série n'est rattachée. Touchez pour choisir la série."
+    p.exhausted || p.status == "failed" -> "le téléchargement a échoué. Touchez pour corriger, ou supprimez-le et relancez la recherche."
+    else -> null
+}
+
+private fun pendingNothingToDo(p: PendingDownload): String = when {
+    p.paused -> "En pause : reprenez-le quand vous voulez."
+    p.status == "importing" -> "Import en cours, rien à faire."
+    p.awaitingClosure -> "Pack traité, rien à faire : il disparaîtra tout seul dans quelques minutes."
+    p.status == "completed" && p.localCopy == "absent" -> "Téléchargé, les fichiers arrivent sur le serveur : rien à faire."
+    p.status == "completed" && p.localCopy == "settling" -> "Copie des fichiers en cours : rien à faire."
+    p.status == "completed" -> "Téléchargé : l'import automatique le prend sous peu, rien à faire."
+    else -> "Téléchargement en cours : rien à faire."
 }
 
 @Composable
@@ -463,7 +585,8 @@ private fun statusLabel(p: PendingDownload): Triple<String, ImageVector, android
 
 @Composable
 private fun Controls(paused: Boolean, busy: Boolean, onAction: (String) -> Unit, controllable: Boolean, onDelete: (() -> Unit)?) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Contrôles à gauche, corbeille à droite, à l'écart (action destructive).
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (controllable) {
         if (paused) ActionButton("Reprendre", Icons.Outlined.PlayArrow, busy) { onAction("resume") }
         else ActionButton("Pause", Icons.Outlined.Pause, busy) { onAction("pause") }
@@ -473,9 +596,17 @@ private fun Controls(paused: Boolean, busy: Boolean, onAction: (String) -> Unit,
             ActionButton("Reprendre", Icons.Outlined.PlayArrow, busy) { onAction("resume") }
         }
         }
-        if (onDelete != null) IconButton(onClick = onDelete, enabled = !busy) {
-            Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error)
+        if (onDelete != null) {
+            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+            DeleteButton(busy, onDelete)
         }
+    }
+}
+
+@Composable
+private fun DeleteButton(busy: Boolean, onDelete: () -> Unit) {
+    IconButton(onClick = onDelete, enabled = !busy) {
+        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer", tint = MaterialTheme.colorScheme.error)
     }
 }
 
@@ -489,6 +620,7 @@ private fun ActionButton(label: String, icon: ImageVector, busy: Boolean, onClic
 private fun WaitingCard(
     w: WaitingFile, detail: WaitingDetail?, selected: Boolean, onLongClick: () -> Unit, onTap: () -> Unit,
     onRetry: suspend (String) -> String,
+    onImport: (WaitingDetail) -> Unit = {}, onFix: (WaitingDetail) -> Unit = {}, onDelete: (WaitingDetail) -> Unit = {},
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -498,7 +630,8 @@ private fun WaitingCard(
         modifier = Modifier.fillMaxWidth().selectable(selected, onLongClick, onTap),
         colors = CardDefaults.cardColors(containerColor = if (selected) cs.primaryContainer else cs.surfaceContainer),
     ) {
-        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(w.filename, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             // Taille et série assignée ; sans détail (pas encore chargé), seule la ligne d'action reste.
@@ -511,8 +644,8 @@ private fun WaitingCard(
             Text(
                 when {
                     w.trackingId == null -> "Pas de téléchargement suivi : à traiter depuis la page Import du site"
-                    reason != null -> "Pas importé : $reason · touchez pour corriger"
-                    else -> "Prêt à importer"
+                    reason != null -> "Pas importé : $reason"
+                    else -> "Prêt : appuyez sur Importer"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (reason != null) cs.tertiary else cs.onSurfaceVariant,
@@ -534,13 +667,30 @@ private fun WaitingCard(
             }) { Icon(Icons.Outlined.Refresh, contentDescription = "Réessayer l'import") }
         }
         }
+        // Actions visibles du fichier : importer, corriger la série ou le tome, supprimer.
+        if (w.trackingId != null && detail?.filepath != null) Row(
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { onImport(detail) }) {
+                Icon(Icons.Outlined.MoveToInbox, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("Importer", modifier = Modifier.padding(start = 6.dp))
+            }
+            TextButton(onClick = { onFix(detail) }) {
+                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("Corriger", modifier = Modifier.padding(start = 6.dp))
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+            IconButton(onClick = { onDelete(detail) }) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer le fichier", tint = cs.error) }
+        }
+        }
     }
 }
 
-/** Supprime le fichier en attente [trackingId] du disque, comme le bouton Supprimer de la page Import. */
-private suspend fun deleteWaitingFile(api: io.github.gwenvador.bullarr.data.BullarrApi, trackingId: Int) {
+/** Supprime du disque le fichier en attente [filepath], comme le bouton Supprimer de la page Import. */
+private suspend fun deleteWaitingFile(api: io.github.gwenvador.bullarr.data.BullarrApi, filepath: String) {
     val file = api.getObject("api/import/state").optJSONArray("files").objects()
-        .firstOrNull { it.optJSONObject("destination")?.int("tracking_id") == trackingId }
+        .firstOrNull { it.str("filepath") == filepath }
         ?: throw io.github.gwenvador.bullarr.data.ApiException("Fichier introuvable sur le disque : rien à supprimer.")
     api.deleteObject(
         "api/import/file",
@@ -568,7 +718,13 @@ private fun guessSeriesName(raw: String?): String {
  * en vrac sont convertis en CBZ, puis les fichiers prêts sont importés (POST /api/import/execute).
  * Renvoie un résumé lisible, avec le détail de chaque échec.
  */
-private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrApi, trackingIds: Set<Int>, target: VolumeTarget? = null): String {
+private suspend fun manualImport(
+    api: io.github.gwenvador.bullarr.data.BullarrApi, trackingIds: Set<Int>, target: VolumeTarget? = null,
+    /** Un seul fichier (chemin sur le serveur) : les autres fichiers du même suivi ne bougent pas. */
+    onlyPath: String? = null,
+    /** Série choisie pour ce fichier, si elle diffère de celle du suivi. */
+    seriesId: Int? = null,
+): String {
     fun JSONObject.dest() = optJSONObject("destination")
     var state = api.getObject("api/import/state")
     val notes = mutableListOf<String>()
@@ -581,6 +737,11 @@ private suspend fun manualImport(api: io.github.gwenvador.bullarr.data.BullarrAp
     }
     if (folders.isNotEmpty()) state = api.getObject("api/import/state")
     val files = state.optJSONArray("files").objects().filter { (it.dest()?.int("tracking_id") ?: -1) in trackingIds }
+        .filter { onlyPath == null || it.str("filepath") == onlyPath }
+    if (seriesId != null) files.forEach { f ->
+        val d = f.dest() ?: return@forEach
+        if (d.int("series_id") != seriesId) { d.put("series_id", seriesId).remove("volume_id"); f.put("manual_override", true) }
+    }
     val ready = files.filter { it.dest()?.int("series_id") != null }
     // Tome choisi à la main (ex. intégrale sans numéro dans le nom) : écrit dans « parsed », comme la page /import du web.
     if (target != null) ready.forEach { f ->

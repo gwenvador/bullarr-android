@@ -187,6 +187,8 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
                 val lib = parseLibraries(api.getArray("api/libraries")).firstOrNull() ?: throw IllegalStateException("Aucune bibliothèque")
                 val o = api.postObject("api/bedetheque/add-series", JSONObject().put("url", url).put("library_id", lib.id))
                 vm.markAdded(url)
+                // La fiche de la série ajoutée s'ouvre (le message reste visible au retour).
+                o.int("series_id")?.let { id -> vm.section = Section.Library; vm.openSeriesById(id, d.title) }
                 snackbar.showSnackbar(if (o.bool("already_exists") == true) "« ${d.title} » est déjà dans ${lib.name}." else "« ${d.title} » ajoutée à ${lib.name}.")
             } catch (e: Exception) { snackbar.showSnackbar(e.readable()) }
             adding = adding - url

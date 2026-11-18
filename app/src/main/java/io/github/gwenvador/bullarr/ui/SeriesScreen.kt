@@ -1046,6 +1046,8 @@ private fun ReadAlsoSheet(vm: AppViewModel, api: BullarrApi, seriesId: Int, seri
                 item.str("url")?.let { vm.markAdded(it) }
                 val msg = "« $title » ajoutée" + if (res.optBoolean("auto_acquire_started")) ", recherche des tomes lancée" else ""
                 android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                // Comme sur le site : la fiche de la série ajoutée s'ouvre.
+                if (id != null) { onDismiss(); vm.openSeriesById(id, title) }
             } catch (e: Exception) {
                 android.widget.Toast.makeText(context, "« $title » : ${e.readable()}", android.widget.Toast.LENGTH_LONG).show()
             } finally {
@@ -1121,13 +1123,14 @@ private fun AuthorAlbumsSheet(vm: AppViewModel, api: BullarrApi, name: String, l
     // Sélection multiple : appui long sur un album, puis appuis pour ajouter ou retirer d'autres.
     var selected by remember { mutableStateOf(setOf<Int>()) }
     fun toggle(index: Int) { selected = if (index in selected) selected - index else selected + index }
-    suspend fun add(index: Int, a: JSONObject) {
+    suspend fun add(index: Int, a: JSONObject): Int? {
         val libraryId = vm.selectedLibrary?.id ?: vm.libraries.firstOrNull()?.id ?: throw ApiException("Aucune bibliothèque disponible")
         val url = a.str("bedetheque_url")
         pending = pending + index
         try {
-            api.postObject("api/bedetheque/add-series", JSONObject().put("url", url).put("library_id", libraryId))
+            val res = api.postObject("api/bedetheque/add-series", JSONObject().put("url", url).put("library_id", libraryId))
             url?.let { vm.markAdded(it) }
+            return res.int("series_id")
         } finally {
             pending = pending - index
         }
@@ -1150,7 +1153,9 @@ private fun AuthorAlbumsSheet(vm: AppViewModel, api: BullarrApi, name: String, l
     }
     fun addAlbum(index: Int, a: JSONObject) {
         val title = a.str("title") ?: "(sans titre)"
-        launchAction(vm.viewModelScope, context, "« $title » ajoutée", running = "Ajout de « $title »") { add(index, a) }
+        launchAction(vm.viewModelScope, context, "« $title » ajoutée", running = "Ajout de « $title »") {
+            add(index, a)?.let { id -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onDismiss(); vm.openSeriesById(id, title) } }
+        }
     }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
         val list = albums

@@ -525,16 +525,9 @@ private fun Reader(
             if (!enhancing && PageCache.cachedEnhanced(meta.volumeId, current + 1) != null) { justDone = true; delay(1800); justDone = false }
         }
         LaunchedEffect(current) { justDone = false }
-        // Page trop grande : pas d'upscaling, on le dit (une fois par album, la raison reste dans le menu de la baguette).
-        val tooLarge = if (Upscaler.enabled) PageCache.tooLargeSize(meta.volumeId, current + 1) else null
-        var hdNotice by remember { mutableStateOf(false) }
-        var hdShown by remember(meta.volumeId) { mutableStateOf(false) }
-        LaunchedEffect(tooLarge) {
-            if (tooLarge != null && !hdShown) { hdShown = true; hdNotice = true; delay(3500); hdNotice = false }
-        }
-        LaunchedEffect(current) { if (tooLarge == null) hdNotice = false }
+        // Pas de pastille « page déjà en haute définition » à l'ouverture : l'info reste dans le menu Upscaling.
         AnimatedVisibility(
-            enhancing || justDone || (hdNotice && tooLarge != null),
+            enhancing || justDone,
             Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.statusBars).padding(top = if (bars) 60.dp else 8.dp, end = 8.dp),
             enter = fadeIn(), exit = fadeOut(),
         ) {
@@ -550,8 +543,7 @@ private fun Reader(
                 Text(
                     when {
                         enhancing -> "Upscaling…"
-                        justDone -> "Upscaling terminé"
-                        else -> "Pas d'upscaling : page déjà en haute définition ($tooLarge px)"
+                        else -> "Upscaling terminé"
                     },
                     color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 8.dp),
                 )

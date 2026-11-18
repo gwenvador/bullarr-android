@@ -225,7 +225,10 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     addingFor?.let { entries ->
         SeriesAddDialog(vm, onDismiss = { addingFor = null }, initialQuery = entries.first().seriesTitle, onAdded = { sid, title ->
             addingFor = null
-            launchAction(scope, context, "Série « $title » créée et rattachée${attached(entries)}", then = { scope.launch { loadAll(refresh = false) } }) {
+            launchAction(scope, context, "Série « $title » créée et rattachée${attached(entries)}", then = {
+                scope.launch { loadAll(refresh = false) }
+                vm.section = Section.Library; vm.openSeriesById(sid, title)
+            }) {
                 applySeries(entries, sid)
             }
         })

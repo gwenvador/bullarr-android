@@ -29,6 +29,8 @@ import io.github.gwenvador.bullarr.data.objects
 import io.github.gwenvador.bullarr.data.parseImportProgress
 import io.github.gwenvador.bullarr.data.parsePendingCount
 import io.github.gwenvador.bullarr.data.readable
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.text.style.TextOverflow
 import io.github.gwenvador.bullarr.data.str
 import io.github.gwenvador.bullarr.data.long
@@ -44,6 +46,10 @@ class ImportInfo(
     val waitingDetail: Map<String, WaitingDetail> = emptyMap(),
     /** Relit tout de suite l'état de l'import (après « Réessayer »). */
     val reload: () -> Unit = {},
+    /** Reprendre l'import automatique mis en pause (depuis le site). */
+    val resume: (suspend () -> Unit)? = null,
+    /** Annuler le fichier en cours d'import : il repasse en import manuel, la pause n'est pas touchée. */
+    val cancel: (suspend () -> Boolean)? = null,
 )
 
 fun waitingKey(trackingId: Int?, filename: String) = "$trackingId|$filename"
@@ -54,13 +60,14 @@ fun rememberImportInfo(vm: AppViewModel): ImportInfo {
     var progress by remember { mutableStateOf<ImportProgress?>(null) }
     var counts by remember { mutableStateOf<ImportPendingCount?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var failures by remember { mutableStateOf(0) }
     Polling(5000, api) {
         if (api != null) try {
             progress = parseImportProgress(api.getObject("api/import/progress"))
             counts = runCatching { parsePendingCount(api.getObject("api/import/pending-count")) }.getOrNull()
-            error = null
+            error = null; failures = 0
         } catch (e: Exception) {
-            error = e.readable()
+            if (++failures >= 2) error = e.readable()
         }
     }
     // Téléchargements terminés que Bullarr ne peut pas importer seul (dossier d'images en vrac) : id de suivi -> explication.
@@ -90,14 +97,16 @@ fun rememberImportInfo(vm: AppViewModel): ImportInfo {
             }.toMap()
         }
     }
-    return ImportInfo(progress, counts, error, blocked, waitingDetail, reload = { tick++ })
+    return ImportInfo(progress, counts, error, blocked, waitingDetail, reload = { tick++ }, resume = api?.let { a -> suspend { a.postObject("api/import/resume", org.json.JSONObject()); tick++ } },
+        cancel = api?.let { a -> suspend { val r = a.postObject("api/import/cancel", org.json.JSONObject()); tick++; r.optBoolean("cancelling") } })
 }
 
 /** Import en cours / fichiers en attente, intégrés en tête de l'Activité. */
 fun androidx.compose.foundation.lazy.LazyListScope.importItems(info: ImportInfo) {
     val progress = info.progress; val counts = info.counts; val error = info.error
     run {
-        error?.let { item { ErrorCard(it) } }
+        // Discret : l'Activité garde ses données, une coupure passagère ne mérite pas une grande carte rouge.
+        error?.let { item { InlineError("État de l'import indisponible", detail = it) } }
         val p = progress
         if (p != null) {
             if (p.processingFile != null || p.claimedFiles.isNotEmpty() || p.paused) item {
@@ -118,7 +127,35 @@ fun androidx.compose.foundation.lazy.LazyListScope.importItems(info: ImportInfo)
                             p.claimedFiles.isNotEmpty() -> Text("Import en préparation", style = MaterialTheme.typography.titleMedium)
                             else -> {}
                         }
-                        if (p.paused) Tag("Import arrêté (mis en pause)", cs.tertiaryContainer, cs.onTertiaryContainer)
+                        if (p.paused) Tag("Import automatique en pause : aucun nouveau fichier n'est pris", cs.tertiaryContainer, cs.onTertiaryContainer)
+                        // Annuler : le fichier en cours s'arrête (il repasse en import manuel) ; la pause n'est pas touchée.
+                        val scope = androidx.compose.runtime.rememberCoroutineScope()
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        var sending by remember { mutableStateOf(false) }
+                        fun run(block: suspend () -> String) {
+                            sending = true
+                            scope.launch {
+                                val msg = try { block() } catch (e: Exception) { e.readable() }
+                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                sending = false
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val cancel = info.cancel
+                            if (p.processingFile != null && cancel != null) androidx.compose.material3.OutlinedButton(
+                                enabled = !sending,
+                                onClick = { run { if (cancel()) "Import annulé : le fichier repasse en import manuel" else "Aucun import actif à annuler" } },
+                                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = cs.error),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, cs.error),
+                            ) { Text("Annuler l'import") }
+                            val resume = info.resume
+                            if (p.paused && resume != null) androidx.compose.material3.OutlinedButton(
+                                enabled = !sending,
+                                onClick = { run { resume(); "Import automatique repris" } },
+                                colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = cs.onSurface),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, cs.onSurfaceVariant),
+                            ) { Text("Reprendre l'import") }
+                        }
                     }
                 }
             }
