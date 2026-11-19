@@ -48,8 +48,10 @@ data class LibraryFilters(
     /** Listes personnelles : clés de [LIST_LABELS] (« to-read », « favorite »). */
     val lists: Set<String> = emptySet(),
     val tags: Set<String> = emptySet(),
+    /** Lecture : clés de [READ_LABELS] (« read », « reading », « unread »). */
+    val reads: Set<String> = emptySet(),
 ) {
-    val activeCount get() = listOf(types, origins, genres, decades, updated, volumes, sizes, votes, lists, tags).count { it.isNotEmpty() }
+    val activeCount get() = listOf(types, origins, genres, decades, updated, volumes, sizes, votes, lists, tags, reads).count { it.isNotEmpty() }
     val isEmpty get() = activeCount == 0
 
     fun matches(s: SeriesSummary, now: LocalDateTime = LocalDateTime.now()): Boolean =
@@ -59,6 +61,7 @@ data class LibraryFilters(
             (updated.isEmpty() || updated.any { updatedMatches(it, s, now) }) &&
             (genres.isEmpty() || s.genres.any { it in genres }) &&
             (lists.isEmpty() || lists.any { listMatches(it, s) }) &&
+            (reads.isEmpty() || readStateOf(s) in reads) &&
             (tags.isEmpty() || s.tags.any { it in tags }) &&
             (votes.isEmpty() || votes.any { voteBucket(it, s.votes) }) &&
             (volumes.isEmpty() || volumes.any { volumeBucket(it, s.volumeCount) }) &&
@@ -76,6 +79,15 @@ val VOLUME_LABELS = linkedMapOf("0" to "Aucun (masquées par défaut)", "1" to "
 val VOTE_LABELS = linkedMapOf("0" to "Aucun vote", "1-10" to "1 à 10", "11-50" to "11 à 50", "51-100" to "51 à 100", "100+" to "Plus de 100")
 val SIZE_LABELS = linkedMapOf("<100" to "< 100 Mo", "100-500" to "100 à 500 Mo", "500-1000" to "500 Mo à 1 Go", "1-5" to "1 à 5 Go", ">5" to "> 5 Go")
 val LIST_LABELS = linkedMapOf("to-read" to "À lire plus tard", "favorite" to "Favoris")
+
+val READ_LABELS = linkedMapOf("read" to "Lu", "reading" to "En cours", "unread" to "Non lu")
+
+/** Comme le site : tout lu = « Lu », un tome lu ou commencé = « En cours », sinon (ou sans tome suivi) « Non lu ». */
+fun readStateOf(s: SeriesSummary) = when {
+    s.readTotal == 0 || s.readCount + s.readingCount == 0 -> "unread"
+    s.readCount >= s.readTotal -> "read"
+    else -> "reading"
+}
 
 fun listMatches(key: String, s: SeriesSummary) = when (key) {
     "to-read" -> s.toReadLater
@@ -180,6 +192,7 @@ fun LibraryFilterSheet(all: List<SeriesSummary>, filters: LibraryFilters, result
                 Group("Genre", genreCounts.map { it.first to it.first }, filters.genres, { k -> all.count { s -> k in s.genres } }) { onChange(filters.copy(genres = it)) }
             }
             item { Group("Listes", LIST_LABELS.toList(), filters.lists, { k -> all.count { s -> listMatches(k, s) } }) { onChange(filters.copy(lists = it)) } }
+            item { Group("Lecture", READ_LABELS.toList(), filters.reads, { k -> all.count { s -> readStateOf(s) == k } }) { onChange(filters.copy(reads = it)) } }
             // Beaucoup de tags : seule une partie est affichée, la recherche trouve le reste.
             if (tagCounts.isNotEmpty()) item {
                 var tagQuery by remember { mutableStateOf("") }

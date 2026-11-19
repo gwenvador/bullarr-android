@@ -462,6 +462,7 @@ private fun SeriesCell(s: SeriesSummary, cover: String?, selected: Boolean, offl
                 if (s.toReadLater) Icon(Icons.Filled.Bookmark, contentDescription = "À lire plus tard", tint = white, modifier = Modifier.size(13.dp))
                 if (offline > 0) Icon(Icons.Outlined.OfflinePin, contentDescription = "$offline album(s) hors ligne", tint = white, modifier = Modifier.size(13.dp))
             }
+            ReadProgressBar(s, Modifier.align(Alignment.BottomCenter).clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp)))
             if (selected) Icon(
                 Icons.Filled.CheckCircle, contentDescription = "Sélectionnée", tint = cs.primary,
                 modifier = Modifier.align(Alignment.TopStart).padding(5.dp).size(24.dp).background(cs.surface, androidx.compose.foundation.shape.CircleShape),
@@ -536,7 +537,10 @@ private fun SeriesRow(s: SeriesSummary, cover: String?, selected: Boolean, offli
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Cover(cover, 52.dp)
+        Box {
+            Cover(cover, 52.dp)
+            ReadProgressBar(s, Modifier.align(Alignment.BottomCenter), height = 3.dp)
+        }
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(s.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -555,5 +559,18 @@ private fun SeriesRow(s: SeriesSummary, cover: String?, selected: Boolean, offli
             }
         }
         if (selected) Icon(Icons.Outlined.CheckCircle, contentDescription = "Sélectionnée", tint = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/**
+ * Barre de lecture en bas de la miniature, comme sur le site : affichée dès qu'un tome est lu
+ * ou commencé, remplie à la part lue (pages des tomes commencés comprises).
+ */
+@Composable
+private fun ReadProgressBar(s: SeriesSummary, modifier: Modifier = Modifier, height: androidx.compose.ui.unit.Dp = 4.dp) {
+    if (s.readTotal == 0 || s.readCount + s.readingCount == 0) return
+    val fraction = (s.readUnits / s.readTotal).toFloat().coerceIn(0f, 1f)
+    Box(modifier.fillMaxWidth().height(height).background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.35f))) {
+        Box(Modifier.fillMaxWidth(fraction).height(height).background(MaterialTheme.colorScheme.primary))
     }
 }

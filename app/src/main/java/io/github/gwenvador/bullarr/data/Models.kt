@@ -188,6 +188,12 @@ data class SeriesSummary(
     /** Listes personnelles : « à lire plus tard » et « favori ». */
     val toReadLater: Boolean = false,
     val isFavorite: Boolean = false,
+    /** Avancement de lecture des tomes possédés (komga_book/read/reading_count). */
+    val readTotal: Int = 0,
+    val readCount: Int = 0,
+    val readingCount: Int = 0,
+    /** Tomes lus, pages des tomes commencés comprises (komga_read_units) : T1 lu + T2 65/67 = 1,97. */
+    val readUnits: Double = 0.0,
     /** Recherche par nom (titre, auteur, univers) et par tags, séparément. */
     val nameKey: String = "",
     val tagsKey: String = "",
@@ -239,14 +245,24 @@ fun parseSeriesList(a: JSONArray): List<SeriesSummary> = a.objects().map {
         tags = tags,
         toReadLater = it.bool("to_read_later") == true,
         isFavorite = it.bool("is_favorite") == true,
+        readTotal = it.int("komga_book_count") ?: 0,
+        readCount = it.int("komga_read_count") ?: 0,
+        readingCount = it.int("komga_reading_count") ?: 0,
+        readUnits = if (it.has("komga_read_units")) it.optDouble("komga_read_units", 0.0) else (it.int("komga_read_count") ?: 0).toDouble(),
     )
 }
 
-/** Minuscules sans accents, pour une recherche tolérante. */
+/**
+ * Minuscules sans accents, pour une recherche tolérante : « Sœur.Marie-Thérèse » et
+ * « soeur marie therese » se retrouvent (ligatures œ/æ/ß, points, tirets et soulignés = espace).
+ */
 fun normalize(s: String): String =
     java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
         .replace(Regex("\\p{Mn}+"), "")
         .lowercase()
+        .replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
+        .replace(Regex("[._\\-]+"), " ")
+        .replace(Regex("\\s+"), " ")
 
 data class VolumeRow(
     val id: Int,
@@ -482,7 +498,10 @@ data class SearchResult(
     val downloadLink: String? get() = raw.str("download_url") ?: raw.str("link")
 }
 
-private fun decodeName(s: String): String = runCatching { java.net.URLDecoder.decode(s.replace("+", "%2B"), "UTF-8") }.getOrDefault(s)
+/** Nom de fichier lisible : %20 et autres encodages d'URL, puis entités HTML (comme le site, validation.js). */
+fun decodeName(s: String): String = runCatching { java.net.URLDecoder.decode(s.replace("+", "%2B"), "UTF-8") }.getOrDefault(s)
+    .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+    .replace("&#039;", "'").replace("&#39;", "'").replace("&apos;", "'")
 
 fun parseSearchResults(o: JSONObject): List<SearchResult> = o.optJSONArray("results").objects().map { r ->
     val source = r.str("source") ?: "?"

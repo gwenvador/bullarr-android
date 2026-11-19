@@ -27,8 +27,8 @@ android {
         applicationId = "io.github.gwenvador.bullarr"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.11"
+        versionCode = 22
+        versionName = "1.12"
         // Amélioration d'image (code natif) : téléphones ARM 64 et 32 bits.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         // Sans adresse : nom réservé .invalid, qui ne correspond à aucun lien.

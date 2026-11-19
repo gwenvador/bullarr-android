@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Download
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -174,13 +176,28 @@ private fun ReviewEntry(r: JSONObject, showHeader: Boolean, sending: Set<Pair<In
         }
     }
     r.str("reason")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    // « une recherche par album à valider » : filtre les fichiers trouvés de cet album pour
+    // repérer le bon (tous les mots, sans accents ni ligatures), comme sur le site.
+    var filter by androidx.compose.runtime.saveable.rememberSaveable(id) { mutableStateOf("") }
+    val words = reviewFilterNormalize(filter).split(' ').filter { it.isNotEmpty() }
+    if (candidates.length() > 1) CompactSearchField(
+        value = filter, onValueChange = { filter = it },
+        placeholder = "Filtrer les fichiers",
+        modifier = Modifier.height(36.dp),
+    )
+    var shown = 0
     for (i in 0 until candidates.length()) {
         val c = candidates.optJSONObject(i) ?: continue
         val idx = c.int("candidate_index") ?: i
+        if (words.isNotEmpty()) {
+            val text = reviewFilterNormalize((c.str("filename") ?: c.str("title"))?.let { io.github.gwenvador.bullarr.data.decodeName(it) }.orEmpty())
+            if (!words.all { it in text }) continue
+        }
+        shown++
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(c.str("filename") ?: c.str("title") ?: "(sans nom)", style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text((c.str("filename") ?: c.str("title"))?.let { io.github.gwenvador.bullarr.data.decodeName(it) } ?: "(sans nom)", style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 val meta = listOfNotNull(
                     c.str("source"), c.long("size")?.takeIf { it > 0 }?.let { formatBytes(it) },
                     c.str("seeders")?.let { "$it seeds" },
@@ -198,4 +215,8 @@ private fun ReviewEntry(r: JSONObject, showHeader: Boolean, sending: Set<Pair<In
             else IconButton(onClick = { onDownload(id, idx) }) { Icon(Icons.Outlined.Download, contentDescription = "Télécharger ce candidat", tint = MaterialTheme.colorScheme.primary) }
         }
     }
+    if (words.isNotEmpty() && shown == 0) Text("Aucun fichier ne correspond.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
+
+private fun reviewFilterNormalize(s: String): String =
+    io.github.gwenvador.bullarr.data.normalize(s.replace(Regex("[–—]"), " ")).trim()

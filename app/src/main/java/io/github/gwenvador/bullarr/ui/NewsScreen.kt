@@ -237,7 +237,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     // Genre (BD / Comics / Manga) d'après l'origine de la fiche Bédéthèque, comme la page web :
     // POST /api/bedetheque/origins, par lots de 100, en redemandant tant que le serveur lit des pages.
     val genres = remember { mutableStateMapOf<String, String?>() }
+    // Genre, années, tomes, parution : lus par le serveur dans la même fiche que l'origine.
+    val metas = remember { mutableStateMapOf<String, List<String>>() }
     var genreFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    // Possession : null = tout, true = possédés (ou déjà téléchargés), false = non possédés.
+    var ownedFilter by rememberSaveable { mutableStateOf<Boolean?>(null) }
     // Pays masqués par défaut ; « Tous » les replie. La recherche filtre titre, sous-titre et série.
     var countriesOpen by rememberSaveable { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -255,7 +259,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 api.postObject("api/bedetheque/origins", org.json.JSONObject().put("urls", org.json.JSONArray(batch)))
             }.getOrNull() ?: break
             val answered = o.optJSONObject("origins")
-            answered?.keys()?.forEach { url -> genres[url] = answered.optJSONObject(url)?.str("kind") }
+            answered?.keys()?.forEach { url ->
+                val entry = answered.optJSONObject(url)
+                genres[url] = entry?.str("kind")
+                bdtMetaTags(entry?.optJSONObject("meta")).takeIf { it.isNotEmpty() }?.let { metas[url] = it }
+            }
             if ((answered == null || answered.length() == 0) && o.optInt("pending") == 0) batch.forEach { genres[it] = null }
             missing = wantedUrls.filter { it !in genres }
             if (missing.isNotEmpty()) kotlinx.coroutines.delay(300)
@@ -263,10 +271,11 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     }
 
     val shownTypes = if (tab == 0) NewsType.entries else listOf(NewsType.entries[tab - 1])
-    val items = remember(tab, feeds.toMap(), genreFilter, genres.toMap(), query) {
+    val items = remember(tab, feeds.toMap(), genreFilter, ownedFilter, genres.toMap(), query) {
         val q = normalize(query).trim()
         shownTypes.flatMap { feeds[it].orEmpty() }
             .filter { genreFilter == null || it.bedethequeUrl?.let { u -> genres[u] } == genreFilter }
+            .filter { ownedFilter == null || newsIsOwned(it) == ownedFilter }
             .filter { q.isEmpty() || normalize(listOfNotNull(it.title, it.subtitle, it.seriesTitle).joinToString(" ")).contains(q) }
             .let { list -> if (tab == 0) list.sortedByDescending { it.date ?: "" } else list }
     }
@@ -310,6 +319,10 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 FilterChip(selected = genreFilter != null, onClick = { if (searchOpen) { searchOpen = false; query = "" } else countriesOpen = true }, label = {
                     if (genreFilter == null) Text("Genre") else Logo(genreFilter, genreFilter.orEmpty(), 20.dp, tip = false)
                 })
+                // Possession : un appui passe de Tout à Possédés, puis Non possédés, puis Tout.
+                if (!searchOpen) FilterChip(selected = ownedFilter != null, onClick = {
+                    ownedFilter = when (ownedFilter) { null -> true; true -> false; false -> null }
+                }, label = { Text(when (ownedFilter) { null -> "Possession"; true -> "Possédés"; false -> "Non possédés" }) })
                 if (searchOpen) BasicTextField(
                     value = query, onValueChange = { query = it }, singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
@@ -360,14 +373,15 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
                 groups.forEachIndexed { gi, members ->
                     val first = members.first()
                     val genreOf = { it: NewsItem -> it.bedethequeUrl?.let { u -> genres[u] } }
+                    val tagsOf = { it: NewsItem -> it.bedethequeUrl?.let { u -> metas[u] }.orEmpty() }
                     if (members.size == 1) item(key = "${first.type}-$gi-${first.title.hashCode()}") {
-                        NewsRow(vm, first, showType = tab == 0, genre = genreOf(first), onActions = { groupMenu = listOf(it) })
+                        NewsRow(vm, first, showType = tab == 0, genre = genreOf(first), onActions = { groupMenu = listOf(it) }, bdtTags = tagsOf(first))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     } else {
                         val groupId = "${newsGroupKey(first)}|${first.date}"
                         val open = expandedGroups[groupId] == true
                         item(key = "g-$gi-$groupId") {
-                            NewsGroupRow(first, members.size, showType = tab == 0, genre = genreOf(first), expanded = open, onPickSeries = { groupMenu = members }) {
+                            NewsGroupRow(first, members.size, ownedCount = members.count(::newsIsOwned), showType = tab == 0, genre = genreOf(first), bdtTags = tagsOf(first), expanded = open, onPickSeries = { groupMenu = members }) {
                                 if (open) expandedGroups.remove(groupId) else expandedGroups[groupId] = true
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -457,7 +471,7 @@ private fun NewsSeriesPicker(vm: AppViewModel, item: NewsItem, count: Int = 1, o
 @Composable
 private fun NewsRow(
     vm: AppViewModel, item: NewsItem, showType: Boolean, genre: String?, onActions: (NewsItem) -> Unit,
-    hideDate: Boolean = false, nested: Boolean = false,
+    hideDate: Boolean = false, nested: Boolean = false, bdtTags: List<String> = emptyList(),
 ) {
     val cs = MaterialTheme.colorScheme
     val uri = LocalUriHandler.current
@@ -485,6 +499,8 @@ private fun NewsRow(
                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 GenreFlag(genre)
             }
+            // Tags Bédéthèque sous le nom de la série (pas sur les albums d'un groupe déplié).
+            if (!nested) BdtTags(bdtTags)
             if (item.subtitle != null && !nested) Text(item.title, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             androidx.compose.foundation.layout.FlowRow(
@@ -494,6 +510,8 @@ private fun NewsRow(
             ) {
                 SourceLine(item, showType, hideDate)
                 if (item.owned) Tag("Possédé", cs.primaryContainer, cs.onPrimaryContainer)
+                // Fichier Telegram / RSS déjà téléchargé (le site affiche « Déjà téléchargé »).
+                else if (item.downloaded) Tag("Téléchargé", cs.primaryContainer, cs.onPrimaryContainer)
                 else if (item.inLibrary) Tag("Série suivie", cs.secondaryContainer, cs.onSecondaryContainer)
                 if (sentTo != null) Tag("Envoyé · $sentTo", cs.secondaryContainer, cs.onSecondaryContainer)
             }
@@ -611,7 +629,7 @@ internal fun groupConsecutiveSeries(items: List<NewsItem>): List<List<NewsItem>>
 /** Ligne « série » d'un groupe replié : nom, nombre d'albums, date / type / origine du plus récent. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: String?, expanded: Boolean, onPickSeries: () -> Unit, onToggle: () -> Unit) {
+private fun NewsGroupRow(first: NewsItem, count: Int, ownedCount: Int, showType: Boolean, genre: String?, bdtTags: List<String>, expanded: Boolean, onPickSeries: () -> Unit, onToggle: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(
         // Appui : déplier ; appui long : actions du groupe (tout importer, série, fiche…).
@@ -625,8 +643,12 @@ private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: 
                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 GenreFlag(genre)
             }
+            BdtTags(bdtTags)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Tag("$count albums", cs.secondaryContainer, cs.onSecondaryContainer)
+                // Possession visible sans déplier le groupe.
+                if (ownedCount == count) Tag("Tous possédés", cs.primaryContainer, cs.onPrimaryContainer)
+                else if (ownedCount > 0) Tag("$ownedCount possédés", cs.primaryContainer, cs.onPrimaryContainer)
                 SourceLine(first, showType, hideDate = false, withSize = false)
             }
         }
@@ -638,6 +660,37 @@ private fun NewsGroupRow(first: NewsItem, count: Int, showType: Boolean, genre: 
     }
 }
 
+
+/** Album possédé, ou fichier Telegram / RSS déjà téléchargé. */
+internal fun newsIsOwned(item: NewsItem): Boolean = item.owned || item.downloaded
+
+/** « genre:Aventure », « 2019–2024 », « 5 tomes », « Série en cours » depuis le « meta » de /api/bedetheque/origins. */
+internal fun bdtMetaTags(meta: org.json.JSONObject?): List<String> {
+    if (meta == null) return emptyList()
+    val genres = meta.optString("genre").split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "null" }.map { "genre:$it" }
+    val start = meta.optInt("year_start", 0); val end = meta.optInt("year_end", 0)
+    val years = when { start == 0 -> null; end != 0 && end != start -> "$start–$end"; else -> "$start" }
+    val tomes = meta.optInt("total_volumes", 0).takeIf { it > 0 }?.let { "$it tome${if (it > 1) "s" else ""}" }
+    val status = meta.optString("status").takeIf { it.isNotBlank() && it != "null" }
+    return genres + listOfNotNull(years, tomes, status)
+}
+
+/** Tags Bédéthèque : genres en couleur, puis années, tomes et parution. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun BdtTags(tags: List<String>) {
+    if (tags.isEmpty()) return
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.foundation.layout.FlowRow(
+        Modifier.padding(top = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        tags.forEach { t ->
+            if (t.startsWith("genre:")) Tag(t.removePrefix("genre:"), cs.tertiaryContainer, cs.onTertiaryContainer)
+            else Tag(t, cs.surfaceVariant, cs.onSurfaceVariant)
+        }
+    }
+}
 
 /** Drapeau d'origine (BD = France, Comics = USA, Manga = Japon), discret, à côté du titre. */
 @Composable

@@ -53,9 +53,6 @@ private fun isTorrentUrl(url: String): Boolean {
 
 private fun isVkUrl(url: String) = Regex("^https://(m\\.)?vk\\.(com|ru)/doc-?\\d+_\\d+").containsMatchIn(url)
 
-private fun decodeName(s: String): String =
-    runCatching { java.net.URLDecoder.decode(s.replace("+", "%2B"), "UTF-8") }.getOrDefault(s)
-
 private fun volumeNumberOf(label: String?): Int? =
     label?.let { Regex("^Tome\\s+(\\d+)$", RegexOption.IGNORE_CASE).find(it)?.groupValues?.get(1)?.toIntOrNull() }
 
