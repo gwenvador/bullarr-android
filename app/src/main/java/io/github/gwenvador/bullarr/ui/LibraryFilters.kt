@@ -59,7 +59,7 @@ data class LibraryFilters(
             (origins.isEmpty() || (s.origin ?: "Autre") in origins) &&
             (decades.isEmpty() || s.yearInt?.let { it / 10 * 10 in decades } == true) &&
             (updated.isEmpty() || updated.any { updatedMatches(it, s, now) }) &&
-            (genres.isEmpty() || s.genres.any { it in genres }) &&
+            (genres.isEmpty() || s.genres.any { g -> genres.any { it.equals(g, ignoreCase = true) } }) &&
             (lists.isEmpty() || lists.any { listMatches(it, s) }) &&
             (reads.isEmpty() || readStateOf(s) in reads) &&
             (tags.isEmpty() || s.tags.any { it in tags }) &&

@@ -288,6 +288,12 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                         vm.openSeries = null
                         vm.section = Section.Library
                     },
+                    onGenre = { genre ->
+                        // Genre cliqué : la bibliothèque s'ouvre filtrée sur ce genre (comme le site).
+                        vm.filters = vm.filters.copy(genres = setOf(genre))
+                        vm.openSeries = null
+                        vm.section = Section.Library
+                    },
                 ) { seriesMenu = true }
             }
             if (d != null) {
@@ -525,7 +531,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
 private fun Header(
     vm: AppViewModel, s: SeriesSummary, d: SeriesDetail?, onToggleMonitor: (Boolean) -> Unit, onAuthor: (String) -> Unit,
     onFavorite: (Boolean) -> Unit, onToRead: (Boolean) -> Unit, onEditTags: () -> Unit, onAiTags: () -> Unit, onTag: (String) -> Unit,
-    onReadAlso: () -> Unit = {}, onTitleClick: () -> Unit,
+    onReadAlso: () -> Unit = {}, onGenre: (String) -> Unit = {}, onTitleClick: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var actionsOpen by rememberSaveable { mutableStateOf(false) }
@@ -595,8 +601,24 @@ private fun Header(
                         }
                     }
                 }
-                val meta = listOfNotNull(d?.years ?: s.year, d?.genre, d?.publishers).joinToString(" · ")
-                if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Années · genres (chacun cliquable : bibliothèque filtrée sur ce genre) · éditeurs.
+                val genreNames = (d?.genre ?: s.genres.joinToString(", ")).split(",").map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.equals("non défini", ignoreCase = true) }
+                val metaParts = listOfNotNull(d?.years ?: s.year, d?.publishers)
+                if (genreNames.isNotEmpty() || metaParts.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+                    (d?.years ?: s.year)?.let { Text(if (genreNames.isEmpty() && d?.publishers == null) it else "$it ·", style = MaterialTheme.typography.bodySmall, color = muted) }
+                    genreNames.forEachIndexed { i, g ->
+                        Text(
+                            g + if (i < genreNames.lastIndex) "," else "", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable { onGenre(g) },
+                        )
+                    }
+                    d?.publishers?.let { Text(if (genreNames.isEmpty()) it else "· $it", style = MaterialTheme.typography.bodySmall, color = muted) }
+                }
                 val cs = MaterialTheme.colorScheme
                 val uri = androidx.compose.ui.platform.LocalUriHandler.current
                 val links = listOfNotNull(
