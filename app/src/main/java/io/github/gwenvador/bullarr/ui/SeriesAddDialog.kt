@@ -177,10 +177,12 @@ enum class VolumeKind(val label: String, val flag: String?, val numberField: Str
     Integral("Intégrale", "is_integral", "integral_number"),
     Hs("HS", "is_hs", "hs_number"),
     Episode("Épisode", "is_episode", "episode_number"),
+    /** Spécial : sans numéro, désigné par l'id du tome (volume_id), choisi dans la liste des tomes. */
+    Special("Spécial", "is_special", "volume_id"),
 }
 
-/** Tome visé : type et numéro (facultatif). */
-data class VolumeTarget(val kind: VolumeKind, val number: Int?) {
+/** Tome visé : type et numéro (facultatif). Pour un spécial, number est l'id du tome. */
+data class VolumeTarget(val kind: VolumeKind, val number: Int?, val label: String? = null) {
     fun putInto(o: org.json.JSONObject) = o.apply {
         kind.flag?.let { put(it, true) }
         if (number != null) put(kind.numberField, number)
@@ -239,7 +241,10 @@ fun AssignSeriesDialog(
             }
         }
     }
-    fun target() = volume.toIntOrNull().let { n -> if (kind == VolumeKind.Tome && n == null) null else VolumeTarget(kind, n) }
+    var specialLabel by remember { mutableStateOf<String?>(null) }
+    fun target() = volume.toIntOrNull().let { n -> if (kind == VolumeKind.Tome && n == null) null else VolumeTarget(kind, n, specialLabel) }
+    // Un spécial n'a pas de numéro : il faut l'avoir choisi dans la liste des tomes.
+    val needsSpecial = kind == VolumeKind.Special && volume.toIntOrNull() == null
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title ?: "Assigner $count téléchargement(s) à une série", style = MaterialTheme.typography.titleMedium) },
@@ -283,11 +288,20 @@ fun AssignSeriesDialog(
                         androidx.compose.material3.OutlinedButton(onClick = { kindMenu = true }) { Text(kind.label) }
                         androidx.compose.material3.DropdownMenu(expanded = kindMenu, onDismissRequest = { kindMenu = false }) {
                             VolumeKind.entries.forEach { k ->
-                                androidx.compose.material3.DropdownMenuItem(text = { Text(k.label) }, onClick = { kind = k; kindMenu = false })
+                                androidx.compose.material3.DropdownMenuItem(text = { Text(k.label) }, onClick = {
+                                    // Passer d'un spécial (id) à un autre type, ou l'inverse : le numéro ne veut plus rien dire.
+                                    if ((k == VolumeKind.Special) != (kind == VolumeKind.Special)) { volume = ""; specialLabel = null }
+                                    kind = k; kindMenu = false
+                                })
                             }
                         }
                     }
-                    OutlinedTextField(
+                    if (kind == VolumeKind.Special) Text(
+                        if (needsSpecial) "Choisissez le spécial dans la liste" else (specialLabel ?: "Spécial choisi"),
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f),
+                        color = if (needsSpecial) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
+                    else OutlinedTextField(
                         value = volume, onValueChange = { volume = it.filter(Char::isDigit) }, singleLine = true,
                         placeholder = { Text("N° (facultatif)") }, modifier = Modifier.weight(1f),
                         keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
@@ -301,18 +315,22 @@ fun AssignSeriesDialog(
                         LazyColumn(Modifier.heightIn(max = 200.dp)) {
                             items(vols) { o ->
                                 val k = when {
+                                    o.optBoolean("is_special") -> VolumeKind.Special
                                     o.optBoolean("is_integral") -> VolumeKind.Integral
                                     o.optBoolean("is_hs") -> VolumeKind.Hs
                                     o.optBoolean("is_episode") -> VolumeKind.Episode
                                     else -> VolumeKind.Tome
                                 }
-                                val n = o.optString(k.numberField, "").removeSuffix(".0").takeIf { it.isNotBlank() && it != "null" }?.toDoubleOrNull()?.toInt()
+                                val n = if (k == VolumeKind.Special) o.optInt("id").takeIf { it > 0 } else o.optString(k.numberField, "").removeSuffix(".0").takeIf { it.isNotBlank() && it != "null" }?.toDoubleOrNull()?.toInt()
                                 val owned = o.optBoolean("is_owned")
                                 val on = k == kind && n != null && volume == n.toString()
                                 val label = io.github.gwenvador.bullarr.data.volumeLabel(o).ifBlank { "Sans numéro" }
                                 val title = o.optString("bedetheque_title", "").takeIf { it.isNotBlank() && it != "null" }
                                 Row(
-                                    Modifier.fillMaxWidth().clickable(enabled = n != null) { kind = k; volume = n.toString() }
+                                    Modifier.fillMaxWidth().clickable(enabled = n != null) {
+                                        kind = k; volume = n.toString()
+                                        specialLabel = if (k == VolumeKind.Special) o.optString("special_label", "").takeIf { it.isNotBlank() && it != "null" } else null
+                                    }
                                         .background(if (on) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
                                         .padding(horizontal = 8.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -336,8 +354,8 @@ fun AssignSeriesDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (!importOnly) TextButton(enabled = chosen != null, onClick = { chosen?.let { onDismiss(); onPick(it, target(), false) } }) { Text("Assigner") }
-                androidx.compose.material3.Button(enabled = chosen != null, onClick = { chosen?.let { onDismiss(); onPick(it, target(), true) } }) { Text(if (importOnly) "Importer ce fichier" else "Assigner et importer") }
+                if (!importOnly) TextButton(enabled = chosen != null && !needsSpecial, onClick = { chosen?.let { onDismiss(); onPick(it, target(), false) } }) { Text("Assigner") }
+                androidx.compose.material3.Button(enabled = chosen != null && !needsSpecial, onClick = { chosen?.let { onDismiss(); onPick(it, target(), true) } }) { Text(if (importOnly) "Importer ce fichier" else "Assigner et importer") }
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },

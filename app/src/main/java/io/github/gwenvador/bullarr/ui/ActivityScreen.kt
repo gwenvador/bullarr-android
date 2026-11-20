@@ -747,11 +747,14 @@ private suspend fun manualImport(
     if (target != null) ready.forEach { f ->
         val n = target.number ?: JSONObject.NULL
         val p = f.optJSONObject("parsed") ?: JSONObject().also { f.put("parsed", it) }
+        val special = target.kind == VolumeKind.Special
+        // Spécial : rattaché par l'id du tome (target_volume_id), comme la page /import du web.
         p.put("volume", if (target.kind == VolumeKind.Tome) n else JSONObject.NULL)
             .put("is_integral", target.kind == VolumeKind.Integral).put("integral_number", if (target.kind == VolumeKind.Integral) n else JSONObject.NULL)
             .put("is_hs", target.kind == VolumeKind.Hs).put("hs_number", if (target.kind == VolumeKind.Hs) n else JSONObject.NULL)
             .put("is_episode", target.kind == VolumeKind.Episode).put("episode_number", if (target.kind == VolumeKind.Episode) n else JSONObject.NULL)
-            .put("is_special", false).put("special_label", JSONObject.NULL).put("tracked_volume_conflict", JSONObject.NULL)
+            .put("is_special", special).put("special_label", if (special) (target.label ?: JSONObject.NULL) else JSONObject.NULL)
+            .put("target_volume_id", if (special) n else JSONObject.NULL).put("tracked_volume_conflict", JSONObject.NULL)
         f.put("manual_override", true)
     }
     val unassigned = files.size - ready.size
