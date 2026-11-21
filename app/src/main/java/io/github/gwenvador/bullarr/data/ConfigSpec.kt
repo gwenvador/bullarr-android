@@ -28,7 +28,8 @@ data class FSecret(
     override val key: String, override val label: String, val keepMasked: Boolean = false,
     override val showWhen: Pair<String, List<String>>? = null,
 ) : Field
-data class FChoice(override val key: String, override val label: String, val options: List<Pair<String, String>>) : Field
+/** [dropdown] : liste déroulante plutôt que des puces (longue liste, ex. fournisseurs SSO). */
+data class FChoice(override val key: String, override val label: String, val options: List<Pair<String, String>>, val dropdown: Boolean = false) : Field
 /** Liste ordonnée dont seul l'ordre se règle (priorité des sources). */
 data class FOrder(override val key: String, override val label: String, val names: Map<String, String>, val help: String? = null) : Field
 /** Sous-ensemble choisi parmi des options. */
@@ -295,17 +296,22 @@ fun buildPayload(spec: Integration, fresh: JSONObject, initial: Map<String, Any>
 /** Accès à Bullarr (mot de passe, SSO). La clé API reste valable quel que soit le mode. */
 val ACCESS = listOf(
     Integration(
-        "login", "Authentification du serveur", "api/auth/config",
+        "login", "Connexion et SSO", "api/auth/config",
         listOf(
-            FChoice("mode", "Authentification", listOf("none" to "Aucune", "password" to "Mot de passe", "oidc" to "SSO (OIDC)", "both" to "Mot de passe + SSO")),
-            FText("username", "Identifiant"),
-            FSecret("password", "Nouveau mot de passe"),
+            FChoice("mode", "Connexion", listOf("none" to "Libre (aucune connexion)", "auth" to "Obligatoire")),
+            FSwitch("oidc_enabled", "Connexion SSO (OIDC)", "Ajoute le bouton SSO sur la page de connexion, à côté des comptes Bullarr (Réglages → Utilisateurs)."),
+            FChoice("provider", "Fournisseur SSO", listOf(
+                "" to "Automatique (d'après l'URL de l'issuer)", "pocket-id" to "Pocket ID", "authentik" to "Authentik",
+                "authelia" to "Authelia", "keycloak" to "Keycloak", "zitadel" to "Zitadel", "kanidm" to "Kanidm",
+                "logto" to "Logto", "okta" to "Okta", "google" to "Google", "microsoft" to "Microsoft", "other" to "Autre",
+            ), dropdown = true),
+            FText("button_label", "Texte du bouton de connexion", "Vide : « Se connecter avec » + le fournisseur"),
             FText("issuer", "URL de l'issuer SSO", "https://sso.exemple.fr", url = true),
             FText("client_id", "Client ID"),
             FSecret("client_secret", "Client secret"),
             FText("scopes", "Scopes", "openid profile email"),
             FSwitch("auto_redirect", "Aller directement au SSO", "Saute le formulaire de connexion de la page web."),
         ),
-        help = "Attention : avec « Aucune », tout le monde accède à Bullarr. L'app continue de fonctionner avec la clé API quel que soit le mode.",
+        help = "Attention : avec « Libre », tout le monde accède à Bullarr. L'app continue de fonctionner avec la clé API quel que soit le mode. Le groupe SSO des administrateurs se règle dans Utilisateurs.",
     ),
 )

@@ -1,6 +1,7 @@
 package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.material.icons.outlined.PowerSettingsNew
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Backup
@@ -333,7 +334,27 @@ private fun FieldEditor(f: Field, e: ConfigEditor, o: JSONObject) {
                 },
             )
         }
-        is FChoice -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        is FChoice -> if (f.dropdown) {
+            var open by remember { mutableStateOf(false) }
+            val current = f.options.firstOrNull { it.first == (e.values[f.key] as? String ?: "") }?.second ?: f.options.first().second
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(f.label, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.foundation.layout.Box {
+                    androidx.compose.material3.OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(current, modifier = Modifier.weight(1f))
+                        Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
+                    }
+                    androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        f.options.forEach { (k, l) ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(l, fontWeight = if (e.values[f.key] == k) androidx.compose.ui.text.font.FontWeight.SemiBold else null) },
+                                onClick = { e.values[f.key] = k; open = false },
+                            )
+                        }
+                    }
+                }
+            }
+        } else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(f.label, style = MaterialTheme.typography.bodyMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 f.options.forEach { (k, l) -> FilterChip(selected = e.values[f.key] == k, onClick = { e.values[f.key] = k }, label = { Text(l) }) }
