@@ -48,6 +48,7 @@ import io.github.gwenvador.bullarr.ui.WebSettingsScreen
 import io.github.gwenvador.bullarr.data.CLIENTS
 import io.github.gwenvador.bullarr.data.IMPORTS
 import io.github.gwenvador.bullarr.data.ACCESS
+import io.github.gwenvador.bullarr.data.INTEGRATIONS
 import io.github.gwenvador.bullarr.data.INDEXERS
 import io.github.gwenvador.bullarr.data.MONITOR
 import io.github.gwenvador.bullarr.data.NOTIFICATIONS
@@ -250,6 +251,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                     "Apparence" -> io.github.gwenvador.bullarr.ui.AppearanceScreen()
                                     "Upscaling" -> io.github.gwenvador.bullarr.ui.ReaderSettingsScreen(vm)
                                     "Connexion" -> ConfigScreen(vm, snackbar, ACCESS)
+                                    "Intégrations" -> ConfigScreen(vm, snackbar, INTEGRATIONS)
                                     "Utilisateurs" -> io.github.gwenvador.bullarr.ui.UsersScreen(vm)
                                     "IA" -> io.github.gwenvador.bullarr.ui.AiSettingsScreen(vm, snackbar)
                                     "Web" -> WebSettingsScreen(vm)

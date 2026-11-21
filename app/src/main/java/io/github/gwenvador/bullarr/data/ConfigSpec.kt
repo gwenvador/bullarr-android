@@ -88,6 +88,10 @@ val CLIENTS = listOf(
         listOf(ENABLED, FText("base_url", "URL", "https://shelfmark.exemple.fr", url = true), FText("username", "Utilisateur"), FSecret("password", "Mot de passe")),
         TestCall(true, "api/shelfmark/test"),
     ),
+)
+
+/** Intégrations : applications reliées à Bullarr (réglages Komga du serveur), comme l'onglet web. */
+val INTEGRATIONS = listOf(
     Integration(
         "komga", "Komga", "api/komga/config",
         listOf(
