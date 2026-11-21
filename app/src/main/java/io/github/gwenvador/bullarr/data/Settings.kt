@@ -30,7 +30,8 @@ class Settings(context: Context) {
 
     /** "key" (clé API), "password" (identifiant) ou "oidc" (SSO). */
     var authMode: String
-        get() = prefs.getString(KEY_MODE, "key") ?: "key"
+        // Par défaut « Compte » ; « Clé API » seulement si une clé est déjà enregistrée (anciennes installations).
+        get() = prefs.getString(KEY_MODE, null) ?: if (apiKey.isNotBlank()) "key" else "password"
         set(value) = prefs.edit().putString(KEY_MODE, value).apply()
 
     var username: String

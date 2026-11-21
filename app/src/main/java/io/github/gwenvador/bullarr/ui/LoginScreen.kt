@@ -61,7 +61,8 @@ import kotlinx.coroutines.launch
 fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedded: Boolean = false) {
     var url by remember { mutableStateOf(vm.settings.serverUrl.ifBlank { vm.settings.lastUrl }) }
     var key by remember { mutableStateOf(vm.settings.apiKey) }
-    var mode by remember { mutableStateOf(vm.settings.authMode) }
+    // La clé API sert à Mihon et aux scripts, pas à la connexion de l'app : ancien mode « key » → Compte.
+    var mode by remember { mutableStateOf(vm.settings.authMode.takeIf { it != "key" } ?: "password") }
     var user by remember { mutableStateOf(vm.settings.username) }
     var pass by remember { mutableStateOf(vm.settings.password) }
     var cookie by remember { mutableStateOf(vm.settings.sessionCookie) }
@@ -102,11 +103,11 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
             modifier = Modifier.fillMaxWidth(),
         )
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            listOf("password" to ("Compte" to Icons.Outlined.Person), "oidc" to ("SSO" to Icons.Outlined.Shield), "key" to ("Clé API" to Icons.Outlined.VpnKey))
+            listOf("password" to ("Compte" to Icons.Outlined.Person), "oidc" to ("SSO" to Icons.Outlined.Shield))
                 .forEachIndexed { i, (m, p) ->
                     SegmentedButton(
                         selected = mode == m, onClick = { mode = m; showKey = false; showPass = false; success = null; error = null },
-                        shape = SegmentedButtonDefaults.itemShape(i, 3),
+                        shape = SegmentedButtonDefaults.itemShape(i, 2),
                         icon = { Icon(p.second, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     ) { Text(p.first) }
                 }

@@ -110,7 +110,7 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
             val detail = runCatching { extractError(JSONObject(text)) }.getOrNull()
                 ?: if (resp.isSuccessful) "réponse inattendue (type $type au lieu d'une image)" else "erreur HTTP ${resp.code}"
             val hint = when (resp.code) {
-                401 -> "\nVérifiez la clé API ou la session (Réglages → Accès)."
+                401 -> "\nSession expirée ou refusée : reconnectez-vous (Réglages → Profil → Se déconnecter)."
                 in 500..599 -> "\nErreur interne de Bullarr (HTTP ${resp.code})."
                 else -> ""
             }
@@ -146,7 +146,7 @@ class BullarrApi(rawBaseUrl: String, private val apiKey: String, private val ses
             }
             e.httpCode == 403 && e.message.orEmpty().contains("sécurité") -> { s.csrf = null; block() }
             e.httpCode == 401 -> throw ApiException(
-                (e.message ?: "") + "\nSession expirée : reconnectez-vous (Réglages → Accès).", 401)
+                (e.message ?: "") + "\nSession expirée : reconnectez-vous (Réglages → Profil → Se déconnecter).", 401)
             else -> throw e
         }
     }
