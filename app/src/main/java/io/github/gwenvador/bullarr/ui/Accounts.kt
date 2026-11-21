@@ -493,6 +493,7 @@ fun ProfileScreen(vm: AppViewModel) {
                 }
             }
         }
+        item { ApiKeysCard(vm) }
         item { LogoutCard(vm) }
     }
 }
