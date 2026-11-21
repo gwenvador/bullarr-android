@@ -146,7 +146,6 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
                         Icon(if (showPass) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, contentDescription = "Afficher ou masquer")
                     }
                 },
-                supportingText = "Compte défini dans Bullarr : Paramètres → Login.",
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -266,12 +265,6 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
         error?.let { ErrorCard(it) }
         savedNote?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
-        Text(
-            "L'URL, la clé et la session sont chiffrées sur l'appareil (EncryptedSharedPreferences). " +
-                "Exemple d'URL : http://192.168.1.10:4000 ou https://bullarr.mondomaine.fr.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         if (!firstRun) {
             OutlinedButton(onClick = { vm.logout() }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
