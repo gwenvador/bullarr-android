@@ -200,7 +200,7 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!firstRun) OutlinedButton(
+            if (!firstRun && mode != "oidc") OutlinedButton(
                 enabled = !testing,
                 onClick = {
                     testing = true; success = null; error = null; savedNote = null
@@ -234,7 +234,8 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
                 if (testing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 else Text("Tester")
             }
-            Button(
+            // SSO : le bouton « Se connecter avec … » suffit, le retour du navigateur connecte l'app.
+            if (mode != "oidc") Button(
                 enabled = url.isNotBlank(),
                 onClick = {
                     scope.launch {
