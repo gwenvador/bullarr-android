@@ -175,8 +175,7 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
                         val base = BullarrApi.normalizeBaseUrl(url)
                         vm.settings.lastUrl = url.trim()
                         vm.ssoError = null
-                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(base.toString().trimEnd('/') + "/login/redirect?app=1")))
+                        openInBrowser(context, android.net.Uri.parse(base.toString().trimEnd('/') + "/login/redirect?app=1"))
                     } catch (e: Exception) { vm.ssoError = e.readable() }
                 },
                 modifier = Modifier.fillMaxWidth(),

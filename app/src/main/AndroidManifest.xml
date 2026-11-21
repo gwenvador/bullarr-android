@@ -9,6 +9,15 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
 
+    <!-- Navigateur par défaut (connexion SSO) : sans ça, Android 11+ cache les autres applis. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
