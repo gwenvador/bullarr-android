@@ -102,7 +102,7 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
             modifier = Modifier.fillMaxWidth(),
         )
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            listOf("key" to ("Clé API" to Icons.Outlined.VpnKey), "password" to ("Compte" to Icons.Outlined.Person), "oidc" to ("SSO" to Icons.Outlined.Shield))
+            listOf("password" to ("Compte" to Icons.Outlined.Person), "oidc" to ("SSO" to Icons.Outlined.Shield), "key" to ("Clé API" to Icons.Outlined.VpnKey))
                 .forEachIndexed { i, (m, p) ->
                     SegmentedButton(
                         selected = mode == m, onClick = { mode = m; showKey = false; showPass = false; success = null; error = null },
