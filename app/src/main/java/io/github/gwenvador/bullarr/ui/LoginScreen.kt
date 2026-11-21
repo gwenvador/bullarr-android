@@ -188,10 +188,6 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
                 Text(if (vm.ssoBusy) "Connexion en cours…" else ssoLabel.ifBlank { "Se connecter avec le SSO" })
             }
             vm.ssoError?.let { ErrorCard(it) }
-            // Secours : fenêtre intégrée, sans passkey (code de connexion ou autre appareil seulement).
-            androidx.compose.material3.TextButton(enabled = url.isNotBlank(), onClick = { sso = true }) {
-                Text(if (cookie.isBlank()) "Dans l'app (sans passkey)" else "Se reconnecter dans l'app")
-            }
             if (cookie.isNotBlank()) Text("Session SSO ouverte.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (sso) OidcLoginDialog(
