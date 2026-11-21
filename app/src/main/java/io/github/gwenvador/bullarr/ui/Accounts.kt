@@ -493,6 +493,7 @@ fun ProfileScreen(vm: AppViewModel) {
                 }
             }
         }
+        item { KomgaLinkCard(vm) }
         item { ApiKeysCard(vm) }
         item { LogoutCard(vm) }
     }

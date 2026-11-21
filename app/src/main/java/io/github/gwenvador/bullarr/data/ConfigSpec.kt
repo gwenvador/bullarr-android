@@ -96,7 +96,7 @@ val CLIENTS = listOf(
             FSwitch("sync_read_progress", "Synchroniser la lecture", "Avancement de lecture partagé entre Komga et Bullarr."),
         ),
         TestCall(true, "api/komga/test"),
-        help = "Compte Komga du serveur (administrateur). Chaque lecteur peut relier son propre compte dans ses Réglages → Intégrations.",
+        help = "Compte Komga du serveur (administrateur). Chaque lecteur peut relier son propre compte dans ses Réglages → Profil.",
     ),
 )
 

@@ -243,7 +243,6 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                 Section.Config -> when (subs.getOrNull(sub) ?: subs.last()) {
                                     "Indexeurs" -> ConfigScreen(vm, snackbar, INDEXERS)
                                     "Clients" -> ConfigScreen(vm, snackbar, CLIENTS)
-                                    "Intégrations" -> io.github.gwenvador.bullarr.ui.IntegrationsScreen(vm)
                                     "Notifications" -> io.github.gwenvador.bullarr.ui.NotificationsScreen(vm, snackbar)
                                     "Imports" -> ConfigScreen(vm, snackbar, IMPORTS)
                                     "Recherche" -> ConfigScreen(vm, snackbar, SEARCH)

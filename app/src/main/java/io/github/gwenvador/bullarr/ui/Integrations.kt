@@ -45,12 +45,13 @@ import io.github.gwenvador.bullarr.data.str
 import org.json.JSONObject
 
 /**
- * Réglages → Intégrations (lecteurs) : relier SON compte Komga. Le serveur se connecte une fois
+ * Réglages → Profil, carte Komga (comme la carte Komga de Mon profil sur le web ; l'ancien
+ * onglet Intégrations n'avait que ça) : relier SON compte Komga. Le serveur se connecte une fois
  * avec l'identifiant et le mot de passe, crée une clé API à son nom et ne garde que cette clé ;
  * l'avancement de lecture affiché et envoyé est alors celui de ce compte (api/komga/me).
  */
 @Composable
-fun IntegrationsScreen(vm: AppViewModel) {
+fun KomgaLinkCard(vm: AppViewModel) {
     val api = vm.api ?: return
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -71,10 +72,10 @@ fun IntegrationsScreen(vm: AppViewModel) {
         launchAction(scope, context, ok, then = { busy = false }) { state = block(); pass = ""; key = "" }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        error?.let { e -> item { ErrorCard(e) } }
-        val s = state ?: return@LazyColumn
-        item {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        error?.let { e -> ErrorCard(e) }
+        val s = state ?: return@Column
+        run {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
