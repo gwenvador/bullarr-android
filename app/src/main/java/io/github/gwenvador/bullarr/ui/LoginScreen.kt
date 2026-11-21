@@ -151,6 +151,22 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
         }
         if (mode == "oidc") {
             val context = androidx.compose.ui.platform.LocalContext.current
+            // Fournisseur et texte du bouton, comme sur la page web (/api/auth/sso-info est public).
+            var ssoProvider by remember { mutableStateOf("") }
+            var ssoLabel by remember { mutableStateOf("") }
+            androidx.compose.runtime.LaunchedEffect(url) {
+                kotlinx.coroutines.delay(400)
+                val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val base = BullarrApi.normalizeBaseUrl(url).toString().trimEnd('/')
+                        BullarrApi.client.newCall(okhttp3.Request.Builder().url("$base/api/auth/sso-info").build()).execute().use { r ->
+                            if (r.isSuccessful) org.json.JSONObject(r.body?.string().orEmpty()) else null
+                        }
+                    } catch (e: Exception) { null }
+                }
+                ssoProvider = info?.optString("provider").orEmpty()
+                ssoLabel = info?.optString("label").orEmpty()
+            }
             // Navigateur du téléphone (passkeys possibles) : Bullarr renvoie ensuite vers bullarr://auth?code=…
             Button(
                 enabled = url.isNotBlank() && !vm.ssoBusy,
@@ -166,9 +182,10 @@ fun LoginScreen(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit, embedd
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (vm.ssoBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else if (hasLogo("sso:$ssoProvider")) Logo("sso:$ssoProvider", ssoLabel, size = 20.dp, tip = false)
                 else Icon(Icons.Outlined.Shield, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
-                Text(if (vm.ssoBusy) "Connexion en cours…" else "Se connecter avec le SSO (navigateur)")
+                Text(if (vm.ssoBusy) "Connexion en cours…" else ssoLabel.ifBlank { "Se connecter avec le SSO" })
             }
             vm.ssoError?.let { ErrorCard(it) }
             // Secours : fenêtre intégrée, sans passkey (code de connexion ou autre appareil seulement).

@@ -45,6 +45,12 @@ private val LOGOS = mapOf(
     "bd" to R.drawable.src_flag_france, "europe" to R.drawable.src_flag_france,
     "comics" to R.drawable.src_flag_us, "usa" to R.drawable.src_flag_us,
     "manga" to R.drawable.src_flag_japan, "asie" to R.drawable.src_flag_japan,
+    // Fournisseurs SSO (bouton de connexion), clés de /api/auth/sso-info préfixées « sso: ».
+    "sso:pocket-id" to R.drawable.sso_pocket_id, "sso:authentik" to R.drawable.sso_authentik,
+    "sso:authelia" to R.drawable.sso_authelia, "sso:keycloak" to R.drawable.sso_keycloak,
+    "sso:zitadel" to R.drawable.sso_zitadel, "sso:kanidm" to R.drawable.sso_kanidm,
+    "sso:logto" to R.drawable.sso_logto, "sso:okta" to R.drawable.sso_okta,
+    "sso:google" to R.drawable.sso_google, "sso:microsoft" to R.drawable.sso_microsoft,
 )
 
 /** Clé de logo pour un libellé quelconque (« qBittorrent », « aMule », « Prowlarr — C411 »…). */
