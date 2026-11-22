@@ -288,14 +288,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (isReader) return
         try { requestCount = client.getObject("api/requests/pending-count").int("total") ?: 0 } catch (_: Exception) {}
         try { reviewCount = client.getObject("api/auto-acquire/reviews/count").int("count") ?: 0 } catch (_: Exception) {}
-        try { importCount = client.getObject("api/import/pending-count").int("waiting_file_count") ?: 0 } catch (_: Exception) {}
+        var waiting: io.github.gwenvador.bullarr.data.ImportPendingCount? = null
+        try {
+            waiting = io.github.gwenvador.bullarr.data.parsePendingCount(client.getObject("api/import/pending-count"))
+            importCount = waiting.waitingFiles
+        } catch (_: Exception) {}
         try {
             val since = badgePrefs.getString("newsSeen", null) ?: java.time.Instant.now().toString().also { badgePrefs.edit().putString("newsSeen", it).apply() }
             newsCount = client.getObject("api/ebdz/nouveautes/new-count", mapOf("since" to since)).int("count") ?: 0
         } catch (_: Exception) {}
         try {
             val st = io.github.gwenvador.bullarr.data.parseActivity(client.getObject("api/activity/status"))
-            activityCount = st.clients.sumOf { it.items.size } + st.pending.size
+            // Pastille = ce qui attend une action (section « À traiter ») : fichiers sur le disque, plus
+            // les téléchargements à corriger qui ne sont ni chez le client ni déjà comptés comme fichier.
+            val files = waiting?.waiting.orEmpty()
+            val seen = files.mapNotNull { it.trackingId }.toSet() + st.clients.flatMap { c -> c.items.mapNotNull { it.trackingId } }
+            activityCount = files.size + st.pending.count { p ->
+                p.id !in seen && ((p.status == "completed" && (p.needsVolume || p.needsSeries)) || p.exhausted || p.status == "failed")
+            }
         } catch (_: Exception) {}
     }
     var query by mutableStateOf("")

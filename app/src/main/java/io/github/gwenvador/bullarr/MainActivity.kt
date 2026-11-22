@@ -171,7 +171,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                             onClick = { vm.openSeries = null; vm.section = s },
                             icon = {
                                 androidx.compose.material3.BadgedBox(badge = {
-                                    val n = if (s == Section.Tracking) vm.importCount + vm.newsCount + vm.reviewCount + vm.requestCount else 0
+                                    val n = if (s == Section.Tracking) vm.activityCount + vm.newsCount + vm.reviewCount + vm.requestCount else 0
                                     if (n > 0) androidx.compose.material3.Badge { Text(if (n > 99) "99+" else "$n") }
                                 }) { Icon(s.icon, contentDescription = null) }
                             },
@@ -202,7 +202,7 @@ private fun BullarrApp(vm: AppViewModel = viewModel()) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Text(label, maxLines = 1)
                                             val n = if (section == Section.Tracking) when (label) {
-                                                "Activité" -> vm.activityCount + vm.importCount
+                                                "Activité" -> vm.activityCount
                                                 "Nouveautés" -> vm.newsCount; "Validation" -> vm.reviewCount + vm.requestCount; else -> 0
                                             } else 0
                                             if (n > 0) androidx.compose.material3.Badge { Text(if (n > 99) "99+" else "$n") }

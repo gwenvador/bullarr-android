@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.compose.material.icons.outlined.SelectAll
@@ -332,8 +333,46 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 }
             }
             importItems(importInfo)
-            importInfo.counts?.waiting.orEmpty().takeIf { it.isNotEmpty() }?.let { waiting ->
-                item { SectionTitle("Fichiers en attente d'import", waiting.size) }
+            fun androidx.compose.foundation.lazy.LazyListScope.pendingItems(list: List<io.github.gwenvador.bullarr.data.PendingDownload>) =
+                items(list, key = { "p-${it.id}" }) { p ->
+                    PendingCard(
+                        p, problem = importInfo.blocked[p.id], selected = "p-${p.id}" in selected,
+                        onLongClick = { toggle("p-${p.id}") },
+                        onTap = {
+                            if (selected.isNotEmpty()) toggle("p-${p.id}")
+                            else if (pendingTodo(p, importInfo.blocked[p.id]) != null) {
+                                resolvingHint = when {
+                                    p.status == "completed" && p.needsVolume && p.seriesId != null -> p.seriesId to "Préciser le tome"
+                                    p.status == "completed" && p.needsVolume -> -1 to "Préciser la série et le tome"
+                                    p.status == "completed" && p.needsSeries -> -1 to "Préciser la série"
+                                    else -> null
+                                }
+                                resolvingFile = null
+                                resolving = p.id to (p.seriesTitle ?: p.title)
+                            }
+                        },
+                        controllable = p.status == "pending" && p.client in CONTROLLABLE &&
+                            (p.client == "telegram" || p.clientItemId != null),
+                        busy = busy == p.id,
+                        onAction = { a -> control(p.id, a) },
+                        onDelete = {
+                            toDelete = p.title to suspend { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit }
+                        },
+                    )
+                }
+            // Deux sections seulement : « À traiter » (ce qui attend une action de votre part :
+            // fichiers sur le disque et téléchargements à corriger), puis « En cours » (le reste).
+            val stNow = status
+            val activeTids = stNow?.clients.orEmpty().flatMap { c -> c.items.mapNotNull { it.trackingId } }.toSet()
+            val onDiskTids = importInfo.counts?.waiting.orEmpty().mapNotNull { it.trackingId }.toSet()
+            // Un même téléchargement n'apparaît qu'une fois : chez le client s'il y est encore, sinon dans le suivi.
+            val pendingRest = stNow?.pending.orEmpty().filter { it.id !in onDiskTids && it.id !in activeTids }
+            val pendingTodoList = pendingRest.filter { pendingTodo(it, importInfo.blocked[it.id]) != null }
+            val pendingQuiet = pendingRest - pendingTodoList.toSet()
+            val waitingFiles = importInfo.counts?.waiting.orEmpty()
+            val todoCount = waitingFiles.size + pendingTodoList.size
+            if (todoCount > 0) item { SectionTitle("À traiter", todoCount, open = !hidePending, onToggle = { hidePending = !hidePending }) }
+            waitingFiles.takeIf { it.isNotEmpty() && !hidePending }?.let { waiting ->
                 items(waiting, key = { "w-${it.key}" }) { w ->
                     WaitingCard(
                         w, detail = importInfo.waitingDetail[waitingKey(w.trackingId, w.filename)], selected = "w-${w.key}" in selected,
@@ -365,6 +404,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                     )
                 }
             }
+            if (!hidePending) pendingItems(pendingTodoList)
             // Données déjà affichées : simple ligne discrète ; grosse carte seulement si rien n'a pu être chargé.
             error?.let { e ->
                 item {
@@ -379,40 +419,8 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                 st.clients.filter { it.error != null }.forEach { c ->
                     item { InlineError("${c.label} injoignable", detail = c.error) }
                 }
-                // Les téléchargements dont le fichier est déjà sur le disque sont dans « Fichiers en attente
-                // d'import » en haut : ici seulement ceux qu'on n'y voit pas (fichiers pas encore là, etc.).
-                val onDisk = importInfo.counts?.waiting.orEmpty().mapNotNull { it.trackingId }.toSet()
-                // Ceux qui attendent une action de notre part d'abord.
-                val pendingOnly = st.pending.filter { it.id !in onDisk }.sortedByDescending { pendingTodo(it, importInfo.blocked[it.id]) != null }
-                if (pendingOnly.isNotEmpty()) item { SectionTitle("En attente d'import", pendingOnly.size, open = !hidePending, onToggle = { hidePending = !hidePending }) }
-                items(if (hidePending) emptyList() else pendingOnly, key = { "p-${it.id}" }) { p ->
-                    PendingCard(
-                        p, problem = importInfo.blocked[p.id], selected = "p-${p.id}" in selected,
-                        onLongClick = { toggle("p-${p.id}") },
-                        onTap = {
-                            if (selected.isNotEmpty()) toggle("p-${p.id}")
-                            else if (pendingTodo(p, importInfo.blocked[p.id]) != null) {
-                                resolvingHint = when {
-                                    p.status == "completed" && p.needsVolume && p.seriesId != null -> p.seriesId to "Préciser le tome"
-                                    p.status == "completed" && p.needsVolume -> -1 to "Préciser la série et le tome"
-                                    p.status == "completed" && p.needsSeries -> -1 to "Préciser la série"
-                                    else -> null
-                                }
-                                resolvingFile = null
-                                resolving = p.id to (p.seriesTitle ?: p.title)
-                            }
-                        },
-                        controllable = p.status == "pending" && p.client in CONTROLLABLE &&
-                            (p.client == "telegram" || p.clientItemId != null),
-                        busy = busy == p.id,
-                        onAction = { a -> control(p.id, a) },
-                        onDelete = {
-                            toDelete = p.title to suspend { api.postObject("api/activity/pending/remove", JSONObject().put("id", p.id)); Unit }
-                        },
-                    )
-                }
-                item { SectionTitle("En cours", active.size, open = !hideActive, onToggle = { hideActive = !hideActive }) }
-                if (active.isEmpty() && !hideActive) item { Text("Aucun téléchargement actif chez les clients.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                item { SectionTitle("En cours", active.size + pendingQuiet.size, open = !hideActive, onToggle = { hideActive = !hideActive }) }
+                if (active.isEmpty() && pendingQuiet.isEmpty() && !hideActive) item { Text("Aucun téléchargement actif chez les clients.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(if (hideActive) emptyList() else active, key = { "a-${it.first.client}-${it.second.clientId ?: it.second.name}" }) { (c, item) ->
                     val key = "a-${c.client}-${item.clientId ?: item.name}"
                     DownloadCard(
@@ -431,6 +439,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
                         }) else null,
                     )
                 }
+                if (!hideActive) pendingItems(pendingQuiet)
             }
         }
     }
@@ -644,8 +653,8 @@ private fun WaitingCard(
             Text(
                 when {
                     w.trackingId == null -> "Pas de téléchargement suivi : à traiter depuis la page Import du site"
-                    reason != null -> "Pas importé : $reason"
-                    else -> "Prêt : appuyez sur Importer"
+                    reason != null -> waitingProblem(detail)
+                    else -> "Prêt à importer."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (reason != null) cs.tertiary else cs.onSurfaceVariant,
@@ -672,19 +681,39 @@ private fun WaitingCard(
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { onImport(detail) }) {
-                Icon(Icons.Outlined.MoveToInbox, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Importer", modifier = Modifier.padding(start = 6.dp))
-            }
-            TextButton(onClick = { onFix(detail) }) {
-                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Corriger", modifier = Modifier.padding(start = 6.dp))
+            // Prêt : « Importer » (et « Modifier » au besoin). Bloqué : seule la correction est proposée,
+            // importer tel quel échouerait de nouveau.
+            if (detail.reason == null) {
+                androidx.compose.material3.FilledTonalButton(onClick = { onImport(detail) }, modifier = Modifier.padding(start = 10.dp)) {
+                    Icon(Icons.Outlined.MoveToInbox, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("Importer", modifier = Modifier.padding(start = 6.dp))
+                }
+                TextButton(onClick = { onFix(detail) }) { Text("Modifier") }
+            } else androidx.compose.material3.FilledTonalButton(onClick = { onFix(detail) }, modifier = Modifier.padding(start = 10.dp)) {
+                Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(fixLabel(detail), modifier = Modifier.padding(start = 6.dp))
             }
             androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
             IconButton(onClick = { onDelete(detail) }) { Icon(Icons.Outlined.DeleteOutline, contentDescription = "Supprimer le fichier", tint = cs.error) }
         }
         }
     }
+}
+
+/** Ce qui bloque le fichier, en une phrase courte (le détail du serveur reste en dessous si besoin). */
+private fun waitingProblem(d: WaitingDetail): String {
+    val r = d.reason.orEmpty()
+    return when {
+        d.seriesId == null -> "Série inconnue : choisissez la série."
+        "num" in r.lowercase() && "tome" in r.lowercase() -> "Numéro de tome introuvable dans le nom : indiquez le tome."
+        else -> "Bloqué : $r"
+    }
+}
+
+private fun fixLabel(d: WaitingDetail): String = when {
+    d.seriesId == null -> "Choisir la série"
+    "tome" in d.reason.orEmpty().lowercase() -> "Indiquer le tome"
+    else -> "Corriger"
 }
 
 /** Supprime du disque le fichier en attente [filepath], comme le bouton Supprimer de la page Import. */

@@ -242,11 +242,17 @@ fun AssignSeriesDialog(
         }
     }
     var specialLabel by remember { mutableStateOf<String?>(null) }
-    fun target() = volume.toIntOrNull().let { n -> if (kind == VolumeKind.Tome && n == null) null else VolumeTarget(kind, n, specialLabel) }
+    // Tome choisi dans la liste (id) : vaut aussi pour une intégrale, un HS ou un one-shot sans numéro.
+    var pickedVolume by remember { mutableStateOf<Int?>(null) }
+    fun target() = volume.toIntOrNull().let { n ->
+        if (pickedVolume == null && kind == VolumeKind.Tome && n == null) null else VolumeTarget(kind, n, specialLabel)
+    }
     // Un spécial n'a pas de numéro : il faut l'avoir choisi dans la liste des tomes.
     val needsSpecial = kind == VolumeKind.Special && volume.toIntOrNull() == null
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.padding(horizontal = 16.dp),
         title = { Text(title ?: "Assigner $count téléchargement(s) à une série", style = MaterialTheme.typography.titleMedium) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -291,7 +297,7 @@ fun AssignSeriesDialog(
                                 androidx.compose.material3.DropdownMenuItem(text = { Text(k.label) }, onClick = {
                                     // Passer d'un spécial (id) à un autre type, ou l'inverse : le numéro ne veut plus rien dire.
                                     if ((k == VolumeKind.Special) != (kind == VolumeKind.Special)) { volume = ""; specialLabel = null }
-                                    kind = k; kindMenu = false
+                                    kind = k; kindMenu = false; pickedVolume = null
                                 })
                             }
                         }
@@ -302,7 +308,7 @@ fun AssignSeriesDialog(
                         color = if (needsSpecial) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
                     else OutlinedTextField(
-                        value = volume, onValueChange = { volume = it.filter(Char::isDigit) }, singleLine = true,
+                        value = volume, onValueChange = { volume = it.filter(Char::isDigit); pickedVolume = null }, singleLine = true,
                         placeholder = { Text("N° (facultatif)") }, modifier = Modifier.weight(1f),
                         keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
                     )
@@ -312,7 +318,7 @@ fun AssignSeriesDialog(
                     if (vols == null) LinearProgressIndicator(Modifier.fillMaxWidth())
                     else if (vols.isNotEmpty()) {
                         Text("Tomes de la série", style = MaterialTheme.typography.labelLarge)
-                        LazyColumn(Modifier.heightIn(max = 200.dp)) {
+                        LazyColumn(Modifier.heightIn(max = 260.dp)) {
                             items(vols) { o ->
                                 val k = when {
                                     o.optBoolean("is_special") -> VolumeKind.Special
@@ -323,23 +329,25 @@ fun AssignSeriesDialog(
                                 }
                                 val n = if (k == VolumeKind.Special) o.optInt("id").takeIf { it > 0 } else o.optString(k.numberField, "").removeSuffix(".0").takeIf { it.isNotBlank() && it != "null" }?.toDoubleOrNull()?.toInt()
                                 val owned = o.optBoolean("is_owned")
-                                val on = k == kind && n != null && volume == n.toString()
+                                val vid = o.optInt("id").takeIf { it > 0 }
+                                val on = if (pickedVolume != null) pickedVolume == vid else k == kind && n != null && volume == n.toString()
                                 val label = io.github.gwenvador.bullarr.data.volumeLabel(o).ifBlank { "Sans numéro" }
                                 val title = o.optString("bedetheque_title", "").takeIf { it.isNotBlank() && it != "null" }
                                 Row(
-                                    Modifier.fillMaxWidth().clickable(enabled = n != null) {
-                                        kind = k; volume = n.toString()
+                                    Modifier.fillMaxWidth().clickable {
+                                        // Intégrale, HS ou one-shot sans numéro : choisis quand même (le serveur les retrouve par le titre).
+                                        kind = k; volume = n?.toString().orEmpty(); pickedVolume = vid
                                         specialLabel = if (k == VolumeKind.Special) o.optString("special_label", "").takeIf { it.isNotBlank() && it != "null" } else null
                                     }
                                         .background(if (on) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
                                         .padding(horizontal = 8.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        listOfNotNull(label, title).joinToString(" · "), modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                    )
+                                    // Titre en entier, sur plusieurs lignes si besoin : on doit pouvoir le lire pour choisir.
+                                    Column(Modifier.weight(1f)) {
+                                        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold)
+                                        title?.let { Text(it, style = MaterialTheme.typography.bodyMedium, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal) }
+                                    }
                                     Text(
                                         if (owned) "possédé" else "manquant", style = MaterialTheme.typography.labelSmall,
                                         color = if (owned) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
