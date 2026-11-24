@@ -100,7 +100,7 @@ fun VolumeEditSheet(
             return@ModalBottomSheet
         }
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Column {
                 Text("Éditer ${v.label}", style = MaterialTheme.typography.titleLarge)
                 Text(seriesTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -138,8 +138,8 @@ fun VolumeEditSheet(
 @Composable
 private fun SectionTitle(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-        Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Text(text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -165,9 +165,12 @@ private fun RenumberSection(api: BullarrApi, v: VolumeRow, others: List<VolumeRo
         if (type == VolType.Volume) OutlinedTextField(suffix, { suffix = it.take(20) }, label = { Text("Suffixe (Bis…)") }, singleLine = true, modifier = Modifier.weight(1f))
     }
     val choices = others.filter { it.id != v.id && !it.isSpecial }
-    if (choices.isNotEmpty()) Box {
-        TextButton(onClick = { pickOpen = true }) {
-            Text("Reprendre le numéro d'un tome de la série"); Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    // Une seule rangée : choix d'un tome de la série à gauche, validation à droite.
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    if (choices.isNotEmpty()) Box(Modifier.weight(1f)) {
+        TextButton(onClick = { pickOpen = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp)) {
+            Text("Depuis un tome", maxLines = 1); Icon(Icons.Outlined.ArrowDropDown, contentDescription = null)
         }
         DropdownMenu(expanded = pickOpen, onDismissRequest = { pickOpen = false }, modifier = Modifier.heightIn(max = 360.dp)) {
             choices.forEach { o ->
@@ -178,7 +181,7 @@ private fun RenumberSection(api: BullarrApi, v: VolumeRow, others: List<VolumeRo
             }
         }
     }
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    else androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
     FilledTonalButton(enabled = changed && !busy, onClick = {
         busy = true; error = null
         scope.launch {
@@ -191,6 +194,7 @@ private fun RenumberSection(api: BullarrApi, v: VolumeRow, others: List<VolumeRo
             } catch (e: Exception) { error = e.readable() } finally { busy = false }
         }
     }) { if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Changer le numéro") }
+    }
 }
 
 /**
@@ -251,11 +255,21 @@ private fun MetadataSection(v: VolumeRow, onSave: (Map<String, String>) -> Unit)
         }
     }
     SectionTitle(Icons.Outlined.Edit, "Métadonnées")
-    fields.forEach { (k, label) ->
+    val labels = fields.toMap()
+    @Composable
+    fun field(k: String, modifier: Modifier) {
         var value by values.getValue(k)
-        OutlinedTextField(value, { value = it }, label = { Text(label) }, singleLine = k != "summary",
-            minLines = if (k == "summary") 3 else 1, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value, { value = it }, label = { Text(labels.getValue(k)) }, singleLine = k != "summary",
+            minLines = if (k == "summary") 3 else 1, textStyle = MaterialTheme.typography.bodyMedium, modifier = modifier)
     }
+    // Deux champs courts par ligne : la fiche tient sur un écran au lieu de huit champs empilés.
+    field("title", Modifier.fillMaxWidth())
+    listOf("year" to "genre", "writer" to "penciller", "colorist" to "publisher").forEach { (a, b) ->
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            field(a, Modifier.weight(1f)); field(b, Modifier.weight(1f))
+        }
+    }
+    field("summary", Modifier.fillMaxWidth())
     FilledTonalButton(onClick = { onSave(values.mapValues { it.value.value }) }) { Text("Enregistrer les métadonnées") }
 }
 
