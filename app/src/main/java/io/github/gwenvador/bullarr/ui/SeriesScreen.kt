@@ -5,6 +5,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloseFullscreen
@@ -297,7 +298,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 ) { seriesMenu = true }
             }
             if (d != null) {
-                val owned = d.volumes.count { it.owned }
+                val owned = d.volumes.count { it.covered }
                 item {
                     Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         // « Albums » : tomes, intégrales, hors-séries, épisodes… réunis.
@@ -356,7 +357,7 @@ fun SeriesScreen(vm: AppViewModel, summary: SeriesSummary, onBack: () -> Unit, o
                 grouped.forEach { (key, list) ->
                     if (grouped.size > 1) item(key = "group-$key") {
                         VolumeGroupHeader(
-                            VOLUME_GROUP_LABELS.getValue(key), owned = list.count { it.owned }, total = list.size,
+                            VOLUME_GROUP_LABELS.getValue(key), owned = list.count { it.covered }, total = list.size,
                             collapsed = key in collapsed, onToggle = { toggleGroup(key) },
                         )
                     }
@@ -717,7 +718,7 @@ private fun Header(
             }
         }
         }
-        d?.volumes?.filter { !it.owned && it.label != "Tome" && volumeGroup(it, d.isOneshot) == "volume" }
+        d?.volumes?.filter { !it.covered && it.label != "Tome" && volumeGroup(it, d.isOneshot) == "volume" }
             ?.map { it.label.removePrefix("Tome ") }?.takeIf { it.isNotEmpty() }?.let { numbers ->
             Text(
                 "Tome ${numbers.joinToString(", ")} manquant",
@@ -766,7 +767,9 @@ private fun VolumeItem(v: VolumeRow, cover: String?, onOpen: () -> Unit, onLongC
             }
         }
         Spacer(Modifier.width(4.dp))
-        if (!v.owned) IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary)
+        if (v.containedInLabel != null) IconTag(Icons.Outlined.Inventory2, "Inclus dans le fichier du ${v.containedInLabel}", cs.secondary,
+            v.containedIn?.let { "Dans T$it" } ?: "Inclus")
+        else if (!v.owned) IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary)
         offlineIcon?.invoke()
         if (onRead != null) IconButton(onClick = onRead) { Icon(Icons.Outlined.PlayArrow, contentDescription = "Lire ce tome", tint = cs.primary) }
         if (onSearch != null) IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, contentDescription = "Chercher ce tome") }
@@ -810,6 +813,7 @@ private fun VolumeSheet(vm: AppViewModel, v: VolumeRow, detail: SeriesDetail?, s
                         if (vm.offline.isDownloaded(v.id)) IconTag(Icons.Outlined.OfflinePin, "Disponible hors ligne", cs.primary, "Téléchargé sur le téléphone")
                         UpscaleStateTag(v)
                         if (v.owned) IconTag(Icons.Outlined.CheckCircle, "Possédé", cs.secondary, "Possédé")
+                        else if (v.containedInLabel != null) IconTag(Icons.Outlined.Inventory2, "Inclus dans le fichier du ${v.containedInLabel}", cs.secondary, "Dans le ${v.containedInLabel}")
                         else IconTag(Icons.Outlined.ReportProblem, "Manquant", cs.tertiary, "Manquant")
                     }
                 }

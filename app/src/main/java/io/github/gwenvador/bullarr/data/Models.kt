@@ -264,6 +264,16 @@ fun normalize(s: String): String =
         .replace(Regex("[._\\-]+"), " ")
         .replace(Regex("\\s+"), " ")
 
+/** contains_volumes : liste JSON stockée en texte (« [2, 3] ») ou tableau. */
+fun parseContainedNumbers(raw: Any?): List<Int> {
+    val array = when (raw) {
+        is org.json.JSONArray -> raw
+        is String -> runCatching { org.json.JSONArray(raw) }.getOrNull()
+        else -> null
+    } ?: return emptyList()
+    return (0 until array.length()).mapNotNull { i -> array.opt(i)?.toString()?.toIntOrNull() }.distinct().sorted()
+}
+
 data class VolumeRow(
     val id: Int,
     val label: String,
@@ -300,8 +310,15 @@ data class VolumeRow(
     val upscaledAt: String? = null,
     /** Dernière demande de ce tome par le compte connecté : pending, searching, rejected (null : aucune). */
     val requested: String? = null,
+    /** Tome sans fichier inclus dans le fichier d'un autre tome (« Tome 1 ») ; null sinon. */
+    val containedInLabel: String? = null,
+    val containedIn: Int? = null,
+    /** Autres tomes inclus dans le fichier de ce tome (Éditer ce tome). */
+    val containsVolumes: List<Int> = emptyList(),
 ) {
     val pageSide: Int get() = maxOf(pageWidth ?: 0, pageHeight ?: 0)
+    /** Possédé : son propre fichier, ou inclus dans le fichier d'un autre tome. */
+    val covered: Boolean get() = owned || containedInLabel != null
     val upscaleBusy: Boolean get() = upscaleStatus == "queued" || upscaleStatus == "running"
 }
 
@@ -376,6 +393,9 @@ fun parseSeriesDetail(o: JSONObject): SeriesDetail {
             upscaledModel = v.optJSONObject("upscaled")?.str("model"),
             upscaledAt = v.optJSONObject("upscaled")?.str("at"),
             requested = v.str("requested"),
+            containedInLabel = v.str("contained_in_label"),
+            containedIn = v.int("contained_in"),
+            containsVolumes = parseContainedNumbers(v.opt("contains_volumes")),
         )
     }
     return SeriesDetail(

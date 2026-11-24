@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -109,6 +110,7 @@ fun VolumeEditSheet(
             if (v.owned) {
                 RenumberSection(api, v, others) { msg -> toast(msg); onDismiss(); onChanged() }
                 HorizontalDivider()
+                if (v.volType() == VolType.Volume && ContainsSection(api, v, others, onChanged)) HorizontalDivider()
                 if (v.format?.lowercase() == "cbz") {
                     MetadataSection(v) { fields ->
                         launchAction(scope, context, "Tome modifié", then = onChanged, running = "Enregistrement des métadonnées de ${v.label}") { ItemActions.editVolume(api, v.id, fields) }
@@ -189,6 +191,49 @@ private fun RenumberSection(api: BullarrApi, v: VolumeRow, others: List<VolumeRo
             } catch (e: Exception) { error = e.readable() } finally { busy = false }
         }
     }) { if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Changer le numéro") }
+}
+
+/**
+ * « Tomes inclus dans ce fichier » (PUT /api/volumes/<id>/contains) : un fichier Tome 1 qui regroupe les tomes 1 à 3.
+ * Seuls les tomes sans fichier sont proposés ; chaque appui enregistre. Retourne false quand rien n'est à proposer.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ContainsSection(api: BullarrApi, v: VolumeRow, others: List<VolumeRow>, onChanged: () -> Unit): Boolean {
+    val numbers = remember(v.id, others) {
+        (v.containsVolumes + others.filter {
+            it.id != v.id && !it.owned && it.volType() == VolType.Volume && !it.isSpecial && it.number != null && it.number != v.number
+        }.mapNotNull { it.number }).distinct().sorted()
+    }
+    if (numbers.isEmpty()) return false
+    val scope = rememberCoroutineScope()
+    var selected by remember(v.id) { mutableStateOf(v.containsVolumes.toSet()) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    SectionTitle(Icons.Outlined.Inventory2, "Tomes inclus dans ce fichier")
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        numbers.forEach { n ->
+            FilterChip(selected = n in selected, label = { Text("T$n") }, onClick = {
+                val next = if (n in selected) selected - n else selected + n
+                val previous = selected
+                selected = next; error = null; status = "…"
+                scope.launch {
+                    try {
+                        val body = JSONObject().put("numbers", org.json.JSONArray(next.sorted()))
+                        val r = api.putObject("api/volumes/${v.id}/contains", body)
+                        if (!r.optBoolean("success", true)) throw ApiException(r.str("error") ?: "Non enregistré")
+                        status = "Enregistré"
+                        onChanged()
+                    } catch (e: Exception) { selected = previous; status = null; error = e.readable() }
+                }
+            })
+        }
+    }
+    Text(status?.let { "$it · " }.orEmpty() + "Un tome sélectionné ne compte plus comme manquant.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    return true
 }
 
 /** Métadonnées ComicInfo du tome (PUT /api/volumes/<id>/manual-metadata). */
