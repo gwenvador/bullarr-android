@@ -2,6 +2,8 @@ package io.github.gwenvador.bullarr.ui
 
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.LibraryAddCheck
 import androidx.compose.foundation.clickable
@@ -119,6 +121,8 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
     var bdgestOrigin by rememberSaveable { mutableStateOf("general") }
     var bdgestYear by rememberSaveable { mutableIntStateOf(java.time.Year.now().value) }
     var authorQuery by rememberSaveable { mutableStateOf("") }
+    // Texte tapé : filtre tout de suite la liste des auteurs de la base ; « Rechercher » interroge Bédéthèque.
+    var authorDraft by rememberSaveable { mutableStateOf(authorQuery) }
     // Pile de navigation interne : thème ouvert, auteur ouvert.
     var theme by remember { mutableStateOf<Pair<String, String>?>(null) }
     var author by remember { mutableStateOf<Author?>(null) }
@@ -147,7 +151,6 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
 
     LaunchedEffect(api, key, attempt) {
         if (cache[key] != null) return@LaunchedEffect
-        if (key == "authors:") return@LaunchedEffect
         loading = true; error = null
         try {
             cache[key] = when {
@@ -171,6 +174,9 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
                 }
                 key.startsWith("bdgest:") -> api.getObject("api/bdgest/top-annuel", mapOf("annee" to bdgestYear.toString(), "origine" to bdgestOrigin))
                     .optJSONArray("items").objects().map { discovery(it, listOf(it.str("volume_label"), it.str("publisher"), it.str("release_date"), it.str("votes"))) }
+                // Sans recherche : auteurs connus de la base (séries de la bibliothèque), comme le site.
+                key == "authors:" -> api.getObject("api/bedetheque/authors/list")
+                    .optJSONArray("authors").objects().map { Author(it.str("name") ?: "?", it.str("url"), null, null, false) }
                 else -> api.getObject("api/bedetheque/authors/search", mapOf("q" to authorQuery.trim()))
                     .optJSONArray("results").objects().map { Author(it.str("name") ?: "?", it.str("url"), null, null, false) }
             }
@@ -215,24 +221,26 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
             tab == 1 -> FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PANTHEON_CATEGORIES.forEach { (k, l) -> FilterChip(selected = pantheonCategory == k, onClick = { pantheonCategory = k }, label = { OriginLabel(k, l) }) }
             }
-            tab == 3 -> Column(Modifier.padding(horizontal = 16.dp)) {
+            // Année et origine sur une seule ligne (défilante) : la liste commence plus haut.
+            tab == 3 -> Row(
+                Modifier.horizontalScroll(rememberScrollState()).padding(end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { bdgestYear-- }, enabled = bdgestYear > 2000) { Icon(Icons.Outlined.ChevronLeft, contentDescription = "Année précédente") }
-                    Text("$bdgestYear", style = MaterialTheme.typography.titleMedium)
-                    IconButton(onClick = { bdgestYear++ }, enabled = bdgestYear < java.time.Year.now().value) { Icon(Icons.Outlined.ChevronRight, contentDescription = "Année suivante") }
+                    IconButton(onClick = { bdgestYear-- }, enabled = bdgestYear > 2000, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.ChevronLeft, contentDescription = "Année précédente") }
+                    Text("$bdgestYear", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    IconButton(onClick = { bdgestYear++ }, enabled = bdgestYear < java.time.Year.now().value, modifier = Modifier.size(36.dp)) { Icon(Icons.Outlined.ChevronRight, contentDescription = "Année suivante") }
                 }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BDGEST_ORIGINS.forEach { (k, l) ->
-                        FilterChip(selected = bdgestOrigin == k, onClick = { bdgestOrigin = k }, label = { OriginLabel(k, l) })
-                    }
+                BDGEST_ORIGINS.forEach { (k, l) ->
+                    FilterChip(selected = bdgestOrigin == k, onClick = { bdgestOrigin = k }, label = { OriginLabel(k, l) })
                 }
             }
             tab == 4 -> {
-                var draft by rememberSaveable { mutableStateOf(authorQuery) }
                 CompactSearchField(
-                    draft, { draft = it }, "Nom d'un auteur…", Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    authorDraft, { authorDraft = it; if (it.isBlank()) authorQuery = "" }, "Filtrer ou chercher un auteur…",
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); authorQuery = draft }),
+                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); authorQuery = authorDraft }),
                 )
             }
         }
@@ -244,17 +252,30 @@ fun EnrichScreen(vm: AppViewModel, snackbar: SnackbarHostState, onOpenSeries: (I
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 6.dp, bottom = 16.dp)) {
             when {
                 key == "themes" -> (data as? List<Pair<String, List<Pair<String, String>>>>)?.forEach { (group, themes) ->
-                    item(key = "g-$group") { Text(group, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 6.dp)) }
+                    item(key = "g-$group") { Text(group, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 4.dp)) }
                     item(key = "t-$group") {
-                        FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            themes.forEach { (slug, name) -> FilterChip(selected = false, onClick = { theme = slug to name }, label = { Text(name) }) }
+                        // Pastilles serrées (pas de marge tactile de 48 dp entre les lignes) : bien plus de thèmes par écran.
+                        FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            themes.forEach { (slug, name) ->
+                                // Pas de Surface(onClick) : elle impose 48 dp de haut (marge tactile) et espace les lignes.
+                                val pill = androidx.compose.foundation.shape.RoundedCornerShape(50)
+                                Text(
+                                    name, style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.clip(pill).background(MaterialTheme.colorScheme.surfaceContainerHigh, pill)
+                                        .clickable { theme = slug to name }.padding(horizontal = 12.dp, vertical = 7.dp),
+                                )
+                            }
                         }
                     }
                 }
                 key.startsWith("pan:") || key.startsWith("authors:") -> {
-                    if (key == "authors:") item { EmptyState("Cherchez un auteur", "Sa bibliographie s'affiche, avec les séries en français à ajouter.") }
-                    (data as? List<Author>)?.let { list ->
-                        if (list.isEmpty()) item { EmptyState("Aucun auteur trouvé") }
+                    // Liste de la base filtrée pendant la frappe (sans accents ni casse).
+                    val words = io.github.gwenvador.bullarr.data.normalize(authorDraft).split(' ').filter { it.isNotBlank() }
+                    (data as? List<Author>)?.let { all -> if (key == "authors:" && words.isNotEmpty()) all.filter { a -> io.github.gwenvador.bullarr.data.normalize(a.name).let { n -> words.all { it in n } } } else all }?.let { list ->
+                        if (list.isEmpty()) item {
+                            if (key == "authors:") EmptyState("Aucun auteur de la base ne correspond", "Appuyez sur Rechercher du clavier pour chercher sur Bédéthèque.")
+                            else EmptyState("Aucun auteur trouvé")
+                        }
                         items(list) { a ->
                             Row(
                                 Modifier.fillMaxWidth().clickable(enabled = a.url != null) { author = a }.padding(horizontal = 16.dp, vertical = 10.dp),

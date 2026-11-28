@@ -236,9 +236,13 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
 
     // Genre (BD / Comics / Manga) d'après l'origine de la fiche Bédéthèque, comme la page web :
     // POST /api/bedetheque/origins, par lots de 100, en redemandant tant que le serveur lit des pages.
-    val genres = remember { mutableStateMapOf<String, String?>() }
+    // Ce qui est déjà connu est gardé sur l'appareil (comme le localStorage du site) : affiché tout
+    // de suite à l'ouverture, sans attendre le serveur ni relire Bédéthèque.
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val originStore = remember { BdtOriginStore(ctx) }
+    val genres = remember { mutableStateMapOf<String, String?>().also { m -> originStore.kinds.forEach { (u, k) -> m[u] = k } } }
     // Genre, années, tomes, parution : lus par le serveur dans la même fiche que l'origine.
-    val metas = remember { mutableStateMapOf<String, List<String>>() }
+    val metas = remember { mutableStateMapOf<String, List<String>>().also { m -> originStore.metas.forEach { (u, t) -> m[u] = t } } }
     var genreFilter by rememberSaveable { mutableStateOf<String?>(null) }
     // Possession : null = tout, true = possédés (ou déjà téléchargés), false = non possédés.
     var ownedFilter by rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -251,22 +255,36 @@ fun NewsScreen(vm: AppViewModel, onOpenSeries: (Int, String) -> Unit) {
     LaunchedEffect(searchOpen) { if (searchOpen) searchFocus.requestFocus() }
     val wantedUrls = remember(feeds.toMap()) { feeds.values.flatten().mapNotNull { it.bedethequeUrl }.distinct() }
     LaunchedEffect(wantedUrls) {
-        var missing = wantedUrls.filter { it !in genres }
+        // Toutes les adresses sont demandées à chaque tour (par lots de 100) : un premier lot que le
+        // serveur ne peut pas encore lire (limite Bédéthèque atteinte) ne bloque plus les suivants,
+        // dont le serveur a souvent déjà la réponse en base.
+        // Genre connu mais sans tags : redemandé aussi, le serveur a pu lire la fiche depuis.
+        var missing = wantedUrls.filter { it !in genres || it !in metas }
         var rounds = 0
-        while (missing.isNotEmpty() && rounds++ < 40) {
-            val batch = missing.take(100)
-            val o = runCatching {
-                api.postObject("api/bedetheque/origins", org.json.JSONObject().put("urls", org.json.JSONArray(batch)))
-            }.getOrNull() ?: break
-            val answered = o.optJSONObject("origins")
-            answered?.keys()?.forEach { url ->
-                val entry = answered.optJSONObject(url)
-                genres[url] = entry?.str("kind")
-                bdtMetaTags(entry?.optJSONObject("meta")).takeIf { it.isNotEmpty() }?.let { metas[url] = it }
+        while (missing.isNotEmpty() && rounds++ < 20) {
+            var progress = false
+            var pending = false
+            var limited = false
+            for (batch in missing.chunked(100)) {
+                val o = runCatching {
+                    api.postObject("api/bedetheque/origins", org.json.JSONObject().put("urls", org.json.JSONArray(batch)))
+                }.getOrNull() ?: return@LaunchedEffect
+                val answered = o.optJSONObject("origins")
+                answered?.keys()?.forEach { url ->
+                    val entry = answered.optJSONObject(url)
+                    genres[url] = entry?.str("kind")
+                    bdtMetaTags(entry?.optJSONObject("meta")).takeIf { it.isNotEmpty() }?.let { metas[url] = it }
+                    progress = true
+                }
+                if (o.optInt("pending") > 0) pending = true
+                else if (answered == null || answered.length() == 0) batch.forEach { genres[it] = null }
+                if (o.optBoolean("limited")) limited = true
             }
-            if ((answered == null || answered.length() == 0) && o.optInt("pending") == 0) batch.forEach { genres[it] = null }
+            originStore.save(genres, metas)
             missing = wantedUrls.filter { it !in genres }
-            if (missing.isNotEmpty()) kotlinx.coroutines.delay(300)
+            // Plus rien à lire, ou Bédéthèque en pause / limite atteinte sans aucun progrès : on s'arrête.
+            if (!pending || (limited && !progress)) break
+            kotlinx.coroutines.delay(if (progress) 300 else 5_000)
         }
     }
 
@@ -516,7 +534,13 @@ private fun NewsRow(
                 if (sentTo != null) Tag("Envoyé · $sentTo", cs.secondaryContainer, cs.onSecondaryContainer)
             }
         }
-        if (item.files.isNotEmpty()) {
+        // Par défaut l'éclair : ajoute la série si besoin et télécharge le fichier (comme « Ajouter la série et
+        // télécharger » du menu). Album déjà possédé : le bouton reste « Télécharger » pour choisir et remplacer.
+        if (item.files.isNotEmpty() && !item.owned) {
+            IconButton(onClick = { dl.quick = item }) {
+                Icon(Icons.Outlined.Bolt, contentDescription = if (item.seriesId == null) "Ajouter la série et télécharger" else "Télécharger dans la série")
+            }
+        } else if (item.files.isNotEmpty()) {
             IconButton(onClick = {
                 dl.choose(item.subtitle ?: item.title, item.files.map { f ->
                     f.job to listOfNotNull(f.volumeLabel, if (f.owned) "Possédé : sera remplacé" else null).joinToString(" · ").ifBlank { null }
@@ -794,5 +818,38 @@ private fun NewsGroupActions(vm: AppViewModel, members: List<NewsItem>, onDismis
                 vm.goToSearch()
             }
         }
+    }
+}
+
+/** Genres et tags Bédéthèque déjà reçus du serveur, gardés sur l'appareil (ils ne changent pas). */
+private class BdtOriginStore(context: android.content.Context) {
+    private val prefs = context.getSharedPreferences("bdt_origins", android.content.Context.MODE_PRIVATE)
+    val kinds = mutableMapOf<String, String>()
+    val metas = mutableMapOf<String, List<String>>()
+
+    init {
+        runCatching {
+            val o = org.json.JSONObject(prefs.getString("v1", null) ?: "{}")
+            o.keys().forEach { url ->
+                val e = o.optJSONObject(url) ?: return@forEach
+                e.optString("k").takeIf { it.isNotEmpty() }?.let { kinds[url] = it }
+                e.optJSONArray("t")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } }
+                    ?.takeIf { it.isNotEmpty() }?.let { metas[url] = it }
+            }
+        }
+    }
+
+    /** Seules les réponses utiles sont gardées : une fiche sans origine ni tag sera redemandée. */
+    fun save(genres: Map<String, String?>, tags: Map<String, List<String>>) {
+        val o = org.json.JSONObject()
+        (genres.keys + tags.keys).forEach { url ->
+            val k = genres[url]; val t = tags[url]
+            if (k == null && t.isNullOrEmpty()) return@forEach
+            o.put(url, org.json.JSONObject().apply {
+                k?.let { put("k", it) }
+                t?.takeIf { it.isNotEmpty() }?.let { put("t", org.json.JSONArray(it)) }
+            })
+        }
+        prefs.edit().putString("v1", o.toString()).apply()
     }
 }
