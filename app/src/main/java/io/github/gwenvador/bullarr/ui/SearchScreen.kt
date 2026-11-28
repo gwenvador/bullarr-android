@@ -79,7 +79,7 @@ import io.github.gwenvador.bullarr.data.Tracking
 import io.github.gwenvador.bullarr.data.formatBytes
 import io.github.gwenvador.bullarr.data.str
 
-/** Résultat de recherche → fichier à envoyer ; null pour Anna's Archive (lien seulement). */
+/** Résultat de recherche → fichier à envoyer ; Anna's Archive passe par Shelfmark (md5 de la release). */
 fun SearchResult.toJob(ctx: SearchContext?): DownloadJob? {
     // Tome transmis pour le suivi : celui du résultat, sinon celui de la fiche (sauf intégrale/HS).
     val volume = volumeNumber ?: ctx?.takeIf { !it.isIntegral && !it.isHs && !it.isEpisode }?.volumeNumber
@@ -93,6 +93,9 @@ fun SearchResult.toJob(ctx: SearchContext?): DownloadJob? {
         }
         "fourtoutici" -> raw.str("file_id")?.let { DownloadJob.Fourtoutici(it, name, t) }
         "vk" -> (raw.str("download_url") ?: raw.str("link"))?.let { DownloadJob.Vk(it, name, t) }
+        "annas_archive" -> raw.str("md5")?.takeIf { Regex("[a-fA-F0-9]{32}").matches(it) }?.let {
+            DownloadJob.Shelfmark(it.lowercase(), raw.str("format"), sizeBytes, raw.str("size_label"), raw.str("info_url"), name, t)
+        }
         else -> null
     }
 }

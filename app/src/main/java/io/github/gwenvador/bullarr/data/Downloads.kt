@@ -35,6 +35,13 @@ sealed interface DownloadJob {
     data class Vk(val url: String, override val name: String, override val tracking: Tracking) : DownloadJob {
         override val key get() = url
     }
+    /** Release Anna's Archive envoyée à Shelfmark (downloadViaShelfmark de search-results-table.js). */
+    data class Shelfmark(
+        val md5: String, val format: String?, val sizeBytes: Long?, val sizeLabel: String?, val infoUrl: String?,
+        override val name: String, override val tracking: Tracking,
+    ) : DownloadJob {
+        override val key get() = "sm:$md5"
+    }
 }
 
 data class DownloadClient(val key: String, val label: String)
@@ -52,6 +59,7 @@ fun fixedClient(job: DownloadJob): DownloadClient? = when (job) {
     is DownloadJob.Telegram -> DownloadClient("telegram", "Telegram")
     is DownloadJob.Fourtoutici -> DownloadClient("fourtoutici", "Fourtoutici")
     is DownloadJob.Vk -> DownloadClient("vk", "VK")
+    is DownloadJob.Shelfmark -> DownloadClient("shelfmark", "Shelfmark")
 }
 
 /** Réponse de POST /api/import/replacement-required : le tome a-t-il déjà un fichier, et lequel. */
@@ -78,6 +86,7 @@ fun DownloadJob.withTracking(t: Tracking): DownloadJob = when (this) {
     is DownloadJob.Telegram -> copy(tracking = t)
     is DownloadJob.Fourtoutici -> copy(tracking = t)
     is DownloadJob.Vk -> copy(tracking = t)
+    is DownloadJob.Shelfmark -> copy(tracking = t)
 }
 
 suspend fun sendDownload(api: BullarrApi, job: DownloadJob, client: DownloadClient, forceReplace: Boolean, qbCategory: String?) {
@@ -110,6 +119,14 @@ suspend fun sendDownload(api: BullarrApi, job: DownloadJob, client: DownloadClie
         is DownloadJob.Vk -> {
             body.put("url", job.url).put("filename", job.name)
             "api/vk/download"
+        }
+        is DownloadJob.Shelfmark -> {
+            body.put("md5", job.md5).put("title", job.name)
+                .put("format", job.format ?: JSONObject.NULL)
+                .put("size", job.sizeBytes ?: JSONObject.NULL)
+                .put("size_label", job.sizeLabel ?: JSONObject.NULL)
+                .put("info_url", job.infoUrl ?: JSONObject.NULL)
+            "api/annas-archive/shelfmark-download"
         }
     }
     api.postObject(path, body)

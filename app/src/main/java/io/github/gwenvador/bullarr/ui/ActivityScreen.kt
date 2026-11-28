@@ -151,7 +151,7 @@ fun ActivityScreen(vm: AppViewModel, snackbar: SnackbarHostState) {
     }
     // Ligne suivie par Bullarr : /pending/remove (annule aussi chez le client) ; sinon suppression directe chez le client.
     val removeUrls = mapOf("qbittorrent" to "api/qbittorrent/remove", "rtorrent" to "api/rtorrent/remove",
-        "deluge" to "api/deluge/remove", "amule" to "api/emule/remove")
+        "deluge" to "api/deluge/remove", "amule" to "api/emule/remove", "shelfmark" to "api/shelfmark/remove")
 
     fun control(trackingId: Int, action: String) {
         busy = trackingId
